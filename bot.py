@@ -25,7 +25,7 @@ Thesis: the morning move tends to reverse around 10:30 ET (7:30 PT).
   5. No time stop: positions ride until their target or stop hits. The only
      forced exit is the end-of-day close (same-day options expire at 4pm ET).
 
-Each ticker runs five groups of the three models:
+Each ticker runs six groups of the three models:
   signal:    the setup above, every model sells green after 5 min
   retrace35 / retrace25: same trend + RSI checks, but instead of the VWAP
              cross they enter once price has retraced 35% / 25% of the morning
@@ -35,6 +35,8 @@ Each ticker runs five groups of the three models:
              (Conservative / Moderate / Aggressive)
   always:    skips the trend, VWAP and RSI checks and trades every day at
              10:28 ET (7:28 PT), betting against the morning move; 5-min hold.
+  longonly:  same as always, but bullish trades only: buys calls after a down
+             morning and skips up mornings; 5-min hold.
 Comparing them shows whether the signal adds value and which hold time works.
 
 ETF fallback: if the option side fails (no contract, buy rejected, options not
@@ -86,6 +88,7 @@ HOLD_MINUTES = {               # minutes before a green trade gets sold, per gro
     "retrace25": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
     "staggered": {"Conservative": 5, "Moderate": 12, "Aggressive": 20},
     "always": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
+    "longonly": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
 }
 RECOVERY_MIN_RETURN = 0.03    # if red at the hold mark, a recovery must reach +3% before selling
 TARGET_COST = 100            # dollars per contract: picks the option whose price is closest to this
@@ -96,7 +99,10 @@ ALWAYS_ENTRY = dtime(10, 28)   # 7:28 PT: when the always-trade models enter
 EOD_CLOSE = dtime(15, 30)      # end-of-day exit, 12:30 PT (options expire at 4pm ET;
                                # GitHub also caps a run at 6 hours)
 USE_RSI_FILTER = True          # signal models also require RSI >70 (up) / <30 (down) in last 30 min
-MODES = ["signal", "retrace35", "retrace25", "staggered", "always"]
+MODES = ["signal", "retrace35", "retrace25", "staggered", "always", "longonly"]
+# longonly: like always (enters at 7:28, no filters) but only takes bullish trades:
+# buys calls after a down morning, skips up mornings (never buys puts)
+ALWAYS_STYLE = {"always", "longonly"}
 # signal/staggered: trend + VWAP cross + RSI. retrace groups: trend + pullback + RSI. always: trades daily
 RETRACE_PCT = {"retrace35": 0.35, "retrace25": 0.25}   # how much of the open-to-extreme move must be given back
 POLL_SECONDS = 10
@@ -357,7 +363,7 @@ class TickerBot:
 
     def step(self, now, results):
         if self.phase == "wait":
-            start = ALWAYS_ENTRY if self.mode == "always" else WINDOW_START
+            start = ALWAYS_ENTRY if self.mode in ALWAYS_STYLE else WINDOW_START
             if not TEST_MODE and now.time() < start:
                 return
             bars = get_bars(self.symbol)
@@ -366,8 +372,11 @@ class TickerBot:
                     return self.finish("No price data came in during the window, no trade")
                 return
             move = bars["close"].iloc[-1] / bars["open"].iloc[0] - 1
-            if TEST_MODE or self.mode == "always":
+            if TEST_MODE or self.mode in ALWAYS_STYLE:
                 self.direction = "up" if move >= 0 else "down"
+                if self.mode == "longonly" and self.direction == "up" and not TEST_MODE:
+                    self.day["direction"] = "up"
+                    return self.finish(f"Morning up ({move:+.2%}), long-only skips bearish trades")
             elif move > TREND_THRESHOLD:
                 self.direction = "up"
             elif move < -TREND_THRESHOLD:
@@ -378,7 +387,7 @@ class TickerBot:
             self.day["direction"] = self.direction
             self.kind = "PUT" if self.direction == "up" else "CALL"
             print(f"{self.tag} Morning {self.direction} {move:+.2%}")
-            if TEST_MODE or self.mode == "always":
+            if TEST_MODE or self.mode in ALWAYS_STYLE:
                 return self.enter(bars["close"].iloc[-1], now)
             self.phase = "watch"
 
