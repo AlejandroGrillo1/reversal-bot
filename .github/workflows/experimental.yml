@@ -2,14 +2,19 @@ name: Experimental
 
 on:
   schedule:
-    - cron: "20 20 * * 1-5"   # 4:20 PM New York time in summer (EDT)
+    - cron: "20 20 * * 1-5"   # 4:20 PM New York time in summer (EDT): updates "this year" only
     - cron: "20 21 * * 1-5"   # 4:20 PM New York time in winter (EST)
   workflow_dispatch:
     inputs:
-      start_date:
-        description: "Start date (YYYY-MM-DD)"
-        default: "2026-01-01"
-        required: true
+      which:
+        description: "Which backtest to run"
+        type: choice
+        default: "this year"
+        options:
+          - "this year"
+          - "last 5 years"
+          - "2022-23 round trip"
+          - "all three"
 
 permissions:
   contents: write
@@ -21,24 +26,34 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install alpaca-py
-      - name: Run experimental backtest
-        run: python experimental.py "${{ github.event.inputs.start_date || '2026-01-01' }}"
+      - name: Run backtests
         env:
           ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          WHICH: ${{ github.event.inputs.which || 'this year' }}
+        run: |
+          if [ "$WHICH" = "this year" ] || [ "$WHICH" = "all three" ]; then
+            python experimental.py 2026-01-01 "" backtest_experimental.json
+          fi
+          if [ "$WHICH" = "last 5 years" ] || [ "$WHICH" = "all three" ]; then
+            python experimental.py 2021-10-01 "" backtest_experimental_5y.json
+          fi
+          if [ "$WHICH" = "2022-23 round trip" ] || [ "$WHICH" = "all three" ]; then
+            python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json
+          fi
       - name: Save results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
-          git add data/backtest_experimental.json
+          git add data/backtest_experimental*.json
           git diff --cached --quiet && { echo "No changes"; exit 0; }
-          git commit -m "Experimental: update"
+          git commit -m "Experimental: ${{ github.event.inputs.which || 'this year' }}"
           for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
           exit 1
