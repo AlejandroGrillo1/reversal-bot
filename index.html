@@ -38,11 +38,11 @@
   .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
   .hero-num { font-family: var(--serif); font-size: clamp(64px, 11vw, 120px); line-height: .9; letter-spacing: -0.02em; margin: 0; }
   .hero-sub { color: var(--ink-2); margin: 14px 0 0; max-width: 42ch; }
-  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
   .stat { padding: 14px 0; border-bottom: 1px solid var(--line); }
-  .stat:nth-child(odd) { padding-right: 16px; }
+  .stat { padding-right: 12px; }
   .stat span { display: block; font-size: 12px; color: var(--muted); }
-  .stat strong { font-family: var(--serif); font-weight: 400; font-size: 30px; line-height: 1.1; }
+  .stat strong { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.15; }
   .pos { color: var(--gain); } .neg { color: var(--loss); }
 
   section { margin-top: 48px; }
@@ -53,6 +53,13 @@
   .strip { display: flex; gap: 5px; flex-wrap: wrap; }
   .day { width: 30px; height: 30px; border-radius: 6px; background: var(--sand); border: 1.5px solid transparent; cursor: pointer; padding: 0; }
   .day.sel { border-color: var(--ink); }
+  .day.err { box-shadow: inset 0 -4px 0 var(--loss); }
+  .errors { margin-top: 16px; background: var(--loss-bg); border-radius: 12px; padding: 14px 16px; }
+  .errors h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--loss); }
+  .errors p { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-2); }
+  .errors code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .pill.warn { background: var(--loss-bg); color: var(--loss); }
+  .pill.warn .dot { background: var(--loss); }
   .day:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
   .board { display: grid; grid-template-columns: 56px repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -79,6 +86,7 @@
   th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
   tr:last-child td { border-bottom: none; }
   td.num, th.num { text-align: right; }
+  .tag.est { background: #F3E7D6; color: #8A6439; }
   .tag { font-size: 11px; color: var(--ink-2); background: var(--sand); border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
   .bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--sand-2); width: 60px; vertical-align: middle; margin-left: 8px; overflow: hidden; }
   .bar > span { display: block; height: 100%; background: var(--ink); }
@@ -96,12 +104,21 @@
   .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .charts .full { grid-column: 1 / -1; }
   .chart-card { padding: 20px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin: -4px 0 16px; }
+  .fgroup { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .fgroup > span { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+  .chip { font: inherit; font-size: 12.5px; border: 1px solid var(--sand-2); background: var(--card); color: var(--muted); border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: #FAF7F2; }
+  .chip.reset { border-style: dashed; }
+  .chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .hidden { display: none !important; }
   .chart-card h3 { font-family: var(--serif); font-weight: 400; font-size: 21px; margin: 0; }
   .chart-card p { margin: 2px 0 12px; font-size: 12.5px; color: var(--muted); }
   .chart-box { position: relative; height: 260px; }
   .charts .full .chart-box { height: 320px; }
   .mode { font-size: 11px; border-radius: 4px; padding: 1px 6px; background: var(--sand); color: var(--ink-2); }
   .mode.always { background: #F3E7D6; color: #8A6439; }
+  .mode.staggered { background: #E9EEE6; color: #4F6650; }
   @media (max-width: 760px) {
     .charts { grid-template-columns: 1fr; }
     .board { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); }
@@ -114,8 +131,9 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <span class="pill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
+      <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
+      <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
     </div>
   </header>
 
@@ -137,22 +155,29 @@
     <div class="sec-head"><h2 id="boardTitle">Session</h2><span class="hint" id="boardDate"></span></div>
     <div class="board" id="board"></div>
     <div class="notes" id="notes"></div>
+    <div id="errors"></div>
   </section>
 
   <section>
     <div class="sec-head"><h2>Performance</h2><span class="hint">Cumulative P&amp;L in dollars, about $100 per trade</span></div>
+    <div class="filters" data-f="perf"></div>
     <div class="charts">
       <div class="card chart-card full">
-        <h3>Group averages</h3><p>Average of the three models in each group. Signal versus always-trade shows whether the setup adds value.</p>
+        <h3>Group averages</h3><p>Average of the three models in each group. Signal versus always shows whether the setup adds value; signal versus staggered shows whether holding longer helps.</p>
         <div class="chart-box"><canvas id="chartAvg" aria-label="Average cumulative P&amp;L by group"></canvas></div>
         <div class="legend" id="legendAvg"></div>
       </div>
-      <div class="card chart-card">
-        <h3>Signal models</h3><p>Trade only when trend, VWAP cross, and RSI all line up</p>
+      <div class="card chart-card" id="cardSignal">
+        <h3>Signal models</h3><p>Trend, VWAP cross, and RSI all line up; green exits at 5 min</p>
         <div class="chart-box"><canvas id="chartSignal" aria-label="Signal models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendSignal"></div>
       </div>
-      <div class="card chart-card">
+      <div class="card chart-card" id="cardStaggered">
+        <h3>Staggered models</h3><p>Same signal, but green exits at 5 / 12 / 20 min</p>
+        <div class="chart-box"><canvas id="chartStaggered" aria-label="Staggered models cumulative P&amp;L"></canvas></div>
+        <div class="legend" id="legendStaggered"></div>
+      </div>
+      <div class="card chart-card" id="cardAlways">
         <h3>Always-trade models</h3><p>Fade the morning move at 7:28 PT every day, no filters</p>
         <div class="chart-box"><canvas id="chartAlways" aria-label="Always-trade models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendAlways"></div>
@@ -162,28 +187,58 @@
 
   <section>
     <div class="sec-head"><h2>Model scorecard</h2><span class="hint">Ranked by win rate</span></div>
+    <div class="filters" data-f="score"></div>
     <div class="card table-wrap"><table id="scorecard"></table></div>
   </section>
 
   <section>
     <div class="sec-head"><h2>Trade log</h2><span class="hint" id="logCount"></span></div>
+    <div class="filters" data-f="log"></div>
     <div class="card table-wrap"><table id="log"></table></div>
   </section>
 
-  <footer id="footer">Signal entries 7:22–7:40 PT · Always-trade entries 7:28 PT · Sells green trades after 5 min (+3% if it was red) · Paper money only</footer>
+  <footer id="footer">Signal entries 7:22–7:40 PT · Always-trade entries 7:28 PT · Green trades sell at the hold mark (+3% if red) · Paper money only</footer>
 </main>
 
 <script>
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
-const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "always"];
-const MODE_NAME = { signal: "Signal", always: "Always" };
+const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "staggered", "always"];
+const MODE_NAME = { signal: "Signal", staggered: "Staggered", always: "Always" };
+const HOLD = { signal: { Conservative: 5, Moderate: 5, Aggressive: 5 }, staggered: { Conservative: 5, Moderate: 12, Aggressive: 20 }, always: { Conservative: 5, Moderate: 5, Aggressive: 5 } };
+const holdLabel = mode => mode === "staggered" ? "5 / 12 / 20m hold" : "5m hold";
 const TK_COLOR = { SPY: "#2B2722", QQQ: "#B8875A" };
 const MODEL_DASH = { Conservative: [], Moderate: [6, 4], Aggressive: [2, 3] };
-const MODE_DASH = { signal: [], always: [6, 4] };
+const MODE_DASH = { signal: [], staggered: [2, 3], always: [6, 4] };
 const dashStyle = d => !d.length ? "solid" : d[0] > 3 ? "dashed" : "dotted";
 let raw = { trades: [], days: [] }, charts = {}, selected = null;
+
+// Filters: each section (performance, scorecard, trade log) has its own
+const FILTER_ROWS = { groups: ["Group", MODES, m => MODE_NAME[m]], tickers: ["Ticker", TICKERS, x => x], models: ["Model", null, x => x] };
+const newFilter = () => ({ groups: new Set(MODES), tickers: new Set(TICKERS), models: new Set(Object.keys(MODELS)) });
+const FILTERS = { perf: newFilter(), score: newFilter(), log: newFilter() };
+const passes = (f, mode, tk, m) => f.groups.has(mode) && f.tickers.has(tk) && f.models.has(m);
+function drawFilters() {
+  document.querySelectorAll(".filters").forEach(box => {
+    const f = FILTERS[box.dataset.f];
+    const all = Object.keys(FILTER_ROWS).every(k => f[k].size === (FILTER_ROWS[k][1] || Object.keys(MODELS)).length);
+    box.innerHTML = Object.entries(FILTER_ROWS).map(([k, [label, opts, name]]) =>
+      `<div class="fgroup"><span>${label}</span>` + (opts || Object.keys(MODELS)).map(o =>
+        `<button class="chip ${f[k].has(o) ? "on" : ""}" data-k="${k}" data-v="${o}" aria-pressed="${f[k].has(o)}">${name(o)}</button>`).join("") + `</div>`).join("")
+      + (all ? "" : `<button class="chip reset" data-reset="1">Show all</button>`);
+  });
+}
+document.addEventListener("click", e => {
+  const chip = e.target.closest(".chip"); if (!chip) return;
+  const key = chip.closest(".filters").dataset.f, f = FILTERS[key];
+  if (chip.dataset.reset) FILTERS[key] = newFilter();
+  else {
+    const s = f[chip.dataset.k], v = chip.dataset.v;
+    if (s.has(v)) { if (s.size > 1) s.delete(v); } else s.add(v);   // always keep at least one selected
+  }
+  render();
+});
 
 const usd = v => (v >= 0 ? "+$" : "−$") + Math.abs(v).toFixed(2);
 const pct = v => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(1) + "%";
@@ -192,6 +247,10 @@ const cls = v => v >= 0 ? "pos" : "neg";
 const sum = a => a.reduce((s, x) => s + x, 0);
 const mean = a => a.length ? sum(a) / a.length : 0;
 const modeOf = x => x.mode || "signal";
+const secs = s => { const [h, m, x] = s.split(":").map(Number); return h * 3600 + m * 60 + (x || 0); };
+const held = t => Math.max(0, secs(t.exit_time) - secs(t.entry_time));
+const dur = s => { if (s == null) return "–"; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : m >= 10 ? `${m}m` : `${m}m ${String(x).padStart(2, "0")}s`; };
 const nice = d => new Date(d + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 const short = d => new Date(d + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
@@ -210,16 +269,17 @@ function fakeData() {
     const edge = mode === "signal" ? 1 : 0.75;
     Object.keys(MODELS).forEach(m => {
       let mv, reason, h0;
-      const r2 = rnd(), quickWin = (m === "Conservative" ? .2 : m === "Moderate" ? .12 : .08) * edge;
-      if (r2 < quickWin) { mv = rule[m][0] + rnd() * .0003; reason = "target"; h0 = 1 + Math.floor(rnd() * 4); }
-      else if (r2 < quickWin + .4 * edge) { mv = .0002 + rnd() * .0008; reason = "green after 5 min"; h0 = 5 + Math.floor(rnd() * 3); }
+      const hold = HOLD[mode][m], stretch = hold / 5;
+      const r2 = rnd(), quickWin = Math.min(.45, (m === "Conservative" ? .2 : m === "Moderate" ? .12 : .08) * edge * Math.sqrt(stretch));
+      if (r2 < quickWin) { mv = rule[m][0] + rnd() * .0003; reason = "target"; h0 = 1 + Math.floor(rnd() * (hold - 1)); }
+      else if (r2 < quickWin + .4 * edge) { mv = .0002 + rnd() * .0008 * stretch; reason = `green after ${hold} min`; h0 = hold + Math.floor(rnd() * 3); }
       else if (m === "Aggressive" && rnd() < .1) { mv = rnd() * .002 - .0015; reason = "end of day"; h0 = 300 - m0; }
-      else if (rnd() < .3 * edge) { mv = .0005 + rnd() * .0005; reason = "recovered +3%"; h0 = 8 + Math.floor(rnd() * 50); }
+      else if (rnd() < .3 * edge) { mv = .0005 + rnd() * .0005; reason = "recovered +3%"; h0 = hold + 3 + Math.floor(rnd() * 50); }
       else if (rnd() < .3) { mv = -rnd() * rule[m][1] * .8; reason = "option stop"; h0 = 30 + Math.floor(rnd() * 120); }
       else { mv = -rule[m][1] - rnd() * .0002; reason = "stop"; h0 = 5 + Math.floor(rnd() * 60); }
       const p = Math.max(-0.95, mv * (150 + rnd() * 40) - h0 * 0.0006);
       let exit = +(entry * (1 + (reason === "option stop" ? -OPT_STOP[m] - rnd() * .02 : Math.max(p, -OPT_STOP[m] - .03)))).toFixed(2);
-      if (reason === "green after 5 min" && exit <= entry) exit = +(entry + 0.01 + Math.floor(rnd() * 4) / 100).toFixed(2);
+      if (reason.startsWith("green after") && exit <= entry) exit = +(entry + 0.01 + Math.floor(rnd() * 4) / 100).toFixed(2);
       if (reason === "recovered +3%" && exit < entry * 1.03) exit = +(Math.ceil(entry * 103) / 100 + Math.floor(rnd() * 4) / 100).toFixed(2);
       const etfEntry = +(atm + (option === "PUT" ? off : -off) * 0.6).toFixed(2), etfExit = +(etfEntry * (1 + (option === "PUT" ? -mv : mv))).toFixed(2);
       trades.push({ date, ticker: tk, mode, model: m, morning, option, contract, entry, exit,
@@ -231,13 +291,26 @@ function fakeData() {
   };
   dates.forEach(date => TICKERS.forEach(tk => {
     const morning = rnd() < .5 ? "up" : "down", r = rnd();
-    if (r < .2) days.push({ date, ticker: tk, mode: "signal", direction: "flat", traded: false, note: "Flat morning, no trade" });
-    else if (r < .45) days.push({ date, ticker: tk, mode: "signal", direction: morning, traded: false, note: `Morning ${morning}, no VWAP cross with RSI confirmation` });
-    else { const o = makeTrades(date, tk, "signal", morning, 1 + Math.floor(rnd() * 17)); days.push({ date, ticker: tk, mode: "signal", direction: morning, traded: true, note: `Morning ${morning}, bought ${o}s, all models closed` }); }
+    if (r < .2) ["signal", "staggered"].forEach(mode => days.push({ date, ticker: tk, mode, direction: "flat", traded: false, note: "Flat morning, no trade" }));
+    else if (r < .45) ["signal", "staggered"].forEach(mode => days.push({ date, ticker: tk, mode, direction: morning, traded: false, note: `Morning ${morning}, no VWAP cross with RSI confirmation` }));
+    else {
+      const m0 = 1 + Math.floor(rnd() * 17), o = makeTrades(date, tk, "signal", morning, m0);
+      days.push({ date, ticker: tk, mode: "signal", direction: morning, traded: true, note: `Morning ${morning}, bought ${o}s, all models closed` });
+      makeTrades(date, tk, "staggered", morning, m0);
+      days.push({ date, ticker: tk, mode: "staggered", direction: morning, traded: true, note: `Morning ${morning}, bought ${o}s, all models closed` });
+    }
     const o2 = makeTrades(date, tk, "always", morning, 6);
     days.push({ date, ticker: tk, mode: "always", direction: morning, traded: true, note: `Morning ${morning}, bought ${o2}s at 7:28, all models closed` });
   }));
-  return { trades, days };
+  const fbDate = dates[dates.length - 6];
+  trades.forEach(t => { if (t.date === fbDate && t.ticker === "QQQ" && t.mode === "always") { t.fallback = true; t.contract = "QQQ (ETF est.)"; t.entry = 1; t.exit = +(1 + t.pnl_pct).toFixed(2); } });
+  days.forEach(d => { if (d.date === fbDate && d.ticker === "QQQ" && d.mode === "always") { d.fallback = true; d.note = `Morning ${d.direction}, options failed so tracked on QQQ price (estimated P&L)`; } });
+  const errors = [
+    { date: fbDate, time: "10:28:03", where: "QQQ always: buy order", message: "RuntimeError: buy QQQ261001C00499000 rejected: insufficient options buying power" },
+    { date: dates[dates.length - 4], time: "10:31:12", where: "QQQ staggered: Moderate sell (target), will keep retrying", message: "RuntimeError: sell QQQ order rejected" },
+    { date: dates[dates.length - 9], time: "10:22:40", where: "SPY signal: picking a contract", message: "ConnectionError: Read timed out (repeated 4x)" },
+  ];
+  return { trades, days, errors };
 }
 
 async function load() {
@@ -272,9 +345,12 @@ function makeChart(id, legendId, labels, series) {
 }
 
 function render() {
+  drawFilters();
   const showTest = document.getElementById("showTest").checked;
-  const trades = raw.trades.filter(t => showTest || !t.test);
+  const showFallback = document.getElementById("showFallback").checked;
+  const trades = raw.trades.filter(t => (showTest || !t.test) && (showFallback || !t.fallback));
   const days = raw.days.filter(d => showTest || !d.test);
+  const errors = (raw.errors || []).filter(e => showTest || !e.test);
   const dates = [...new Set(days.map(d => d.date))].sort();
   const latest = dates[dates.length - 1];
   if (!selected || !dates.includes(selected)) selected = latest;
@@ -287,27 +363,33 @@ function render() {
     document.getElementById("heroSub").textContent = "No sessions yet. The bot looks for entries each weekday from 7:22 to 7:40 PT.";
   } else {
     const t = trades.filter(x => x.date === selected), p = sum(t.map(x => x.pnl_usd));
-    const sig = t.filter(x => modeOf(x) === "signal");
     const num = document.getElementById("heroNum");
     num.textContent = t.length ? usd(p) : "No trade";
     num.className = "hero-num " + (t.length ? cls(p) : "");
     document.getElementById("heroLabel").textContent = (selected === latest ? "Latest session · " : "Session · ") + short(selected);
     document.getElementById("heroSub").textContent = t.length
-      ? `${t.filter(x => x.pnl_usd > 0).length} of ${t.length} trades closed green. Signal models ${sig.length ? usd(sum(sig.map(x => x.pnl_usd))) : "didn't trigger"}, always-trade ${usd(sum(t.filter(x => modeOf(x) === "always").map(x => x.pnl_usd)))}.`
+      ? `${t.filter(x => x.pnl_usd > 0).length} of ${t.length} trades closed green. ` + MODES.map(md => {
+          const g = t.filter(x => modeOf(x) === md);
+          return `${MODE_NAME[md]} ${g.length ? usd(sum(g.map(x => x.pnl_usd))) : "didn't trigger"}`;
+        }).join(", ") + "."
       : "Nothing traded. Check the notes below for why.";
   }
 
   const wins = trades.filter(t => t.pnl_usd > 0).length, total = sum(trades.map(t => t.pnl_usd));
   const byMode = m => sum(trades.filter(t => modeOf(t) === m).map(t => t.pnl_usd));
   const greenDays = tradedDays.filter(d => dayPnl(d) > 0).length;
-  const sigP = byMode("signal"), alwP = byMode("always");
+  const sigP = byMode("signal"), stgP = byMode("staggered"), alwP = byMode("always");
+  const winsT = trades.filter(t => t.pnl_usd > 0), lossT = trades.filter(t => t.pnl_usd <= 0);
   document.getElementById("stats").innerHTML = [
     ["Total P&L", `<span class="${cls(total)}">${usd(total)}</span>`],
     ["Win rate", trades.length ? Math.round(100 * wins / trades.length) + "%" : "–"],
-    ["Signal models", trades.length ? `<span class="${cls(sigP)}">${usd(sigP)}</span>` : "–"],
-    ["Always-trade models", trades.length ? `<span class="${cls(alwP)}">${usd(alwP)}</span>` : "–"],
     ["Trades", trades.length],
+    ["Signal", trades.length ? `<span class="${cls(sigP)}">${usd(sigP)}</span>` : "–"],
+    ["Staggered", trades.length ? `<span class="${cls(stgP)}">${usd(stgP)}</span>` : "–"],
+    ["Always", trades.length ? `<span class="${cls(alwP)}">${usd(alwP)}</span>` : "–"],
     ["Green days", tradedDays.length ? `${greenDays}/${tradedDays.length}` : "–"],
+    ["Avg hold time", trades.length ? dur(mean(trades.map(held))) : "–"],
+    ["Hold: wins / losses", trades.length ? `${winsT.length ? dur(mean(winsT.map(held))) : "–"} / ${lossT.length ? dur(mean(lossT.map(held))) : "–"}` : "–"],
   ].map(([k, v]) => `<div class="stat"><span>${k}</span><strong>${v}</strong></div>`).join("");
 
   // Daily strip
@@ -315,8 +397,9 @@ function render() {
   document.getElementById("strip").innerHTML = dates.map(d => {
     const has = trades.some(t => t.date === d), p = dayPnl(d), a = 0.25 + 0.75 * Math.abs(p) / maxAbs;
     const bg = !has ? "" : p >= 0 ? `background: rgba(76,122,91,${a.toFixed(2)})` : `background: rgba(176,82,60,${a.toFixed(2)})`;
-    const label = `${short(d)}: ${has ? usd(p) : "no trade"}`;
-    return `<button class="day ${d === selected ? "sel" : ""}" style="${bg}" data-d="${d}" title="${label}" aria-label="${label}"></button>`;
+    const nErr = errors.filter(e => e.date === d).length;
+    const label = `${short(d)}: ${has ? usd(p) : "no trade"}${nErr ? ` · ${nErr} error${nErr > 1 ? "s" : ""}` : ""}`;
+    return `<button class="day ${d === selected ? "sel" : ""} ${errors.some(e => e.date === d) ? "err" : ""}" style="${bg}" data-d="${d}" title="${label}" aria-label="${label}"></button>`;
   }).join("") || `<span class="hint">Days will appear here as the bot runs.</span>`;
   document.querySelectorAll(".day").forEach(b => b.onclick = () => { selected = b.dataset.d; render(); });
 
@@ -328,34 +411,49 @@ function render() {
   MODES.forEach((mode, i) => {
     if (i) html += `<div class="divider"></div>`;
     for (const tk of TICKERS) {
-      html += `<div class="t">${tk}<small>${MODE_NAME[mode]}</small></div>`;
+      html += `<div class="t">${tk}<small>${MODE_NAME[mode]}</small><small style="text-transform:none;letter-spacing:0">${holdLabel(mode)}</small></div>`;
       for (const m of Object.keys(MODELS)) {
         const t = st.find(x => x.ticker === tk && x.model === m && modeOf(x) === mode);
         html += t
-          ? `<div class="cell ${t.pnl_usd >= 0 ? "win" : "lose"}"><div class="big ${cls(t.pnl_usd)}">${pct(t.pnl_pct)}</div><div class="small">${usd(t.pnl_usd)} · ${t.option} · ${t.reason}${t.etf_move != null ? `<br>${t.ticker} ${pct2(t.etf_move)}` : ""}<br>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)} ET</div></div>`
+          ? `<div class="cell ${t.pnl_usd >= 0 ? "win" : "lose"}"><div class="big ${cls(t.pnl_usd)}">${pct(t.pnl_pct)}</div><div class="small">${t.fallback ? '<span class="tag est" style="margin:0 0 4px">ETF est.</span><br>' : ""}${usd(t.pnl_usd)} · ${t.option} · ${t.reason}${t.etf_move != null ? `<br>${t.ticker} ${pct2(t.etf_move)}` : ""}<br>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)} ET</div></div>`
           : `<div class="cell none">No trade</div>`;
       }
     }
   });
   document.getElementById("board").innerHTML = html;
+  const dayErr = errors.filter(e => e.date === selected);
+  document.getElementById("errors").innerHTML = dayErr.length
+    ? `<div class="errors"><h4>${dayErr.length} issue${dayErr.length > 1 ? "s" : ""} this session. The bot logged ${dayErr.length > 1 ? "them" : "it"} and kept going.</h4>` +
+      dayErr.map(e => `<p>${e.time.slice(0, 5)} ET · <b>${e.where}</b><br><code>${e.message.replace(/</g, "&lt;")}</code></p>`).join("") + `</div>`
+    : "";
+  const latestErr = errors.filter(e => e.date === latest).length, pill = document.getElementById("statusPill");
+  pill.className = "pill" + (latestErr ? " warn" : "");
+  pill.innerHTML = `<span class="dot"></span>` + (latestErr ? `${latestErr} error${latestErr > 1 ? "s" : ""} in latest session` : "Paper trading · SPY · QQQ");
   document.getElementById("notes").innerHTML = days.filter(d => d.date === selected)
     .map(d => `<p><b>${d.ticker} · ${MODE_NAME[modeOf(d)]}</b> · ${d.note}</p>`).join("");
 
   // Charts
   const labels = tradedDays.map(short);
   const cum = (tk, mode, m) => { let run = 0; return tradedDays.map(d => (run += sum(trades.filter(t => t.date === d && t.ticker === tk && t.model === m && modeOf(t) === mode).map(t => t.pnl_usd)))); };
+  const FP = FILTERS.perf, pickedModels = Object.keys(MODELS).filter(m => FP.models.has(m));
   const avgSeries = [];
-  MODES.forEach(mode => TICKERS.forEach(tk => {
-    const parts = Object.keys(MODELS).map(m => cum(tk, mode, m));
+  MODES.filter(m => FP.groups.has(m)).forEach(mode => TICKERS.filter(tk => FP.tickers.has(tk)).forEach(tk => {
+    const parts = pickedModels.map(m => cum(tk, mode, m));
     avgSeries.push({ label: `${tk} ${MODE_NAME[mode].toLowerCase()} avg`, color: TK_COLOR[tk], dash: MODE_DASH[mode], width: 2.2,
       data: tradedDays.map((_, i) => +mean(parts.map(p => p[i])).toFixed(2)) });
   }));
   makeChart("chartAvg", "legendAvg", labels, avgSeries);
+  const shown = MODES.filter(m => FP.groups.has(m));
   for (const mode of MODES) {
+    const key = mode[0].toUpperCase() + mode.slice(1), card = document.getElementById("card" + key);
+    card.classList.toggle("hidden", !FP.groups.has(mode));
+    // odd number of charts showing: let the last one span the full width
+    card.classList.toggle("full", shown.length % 2 === 1 && shown[shown.length - 1] === mode);
+    if (!FP.groups.has(mode)) continue;
     const series = [];
-    TICKERS.forEach(tk => Object.keys(MODELS).forEach(m =>
+    TICKERS.filter(tk => FP.tickers.has(tk)).forEach(tk => pickedModels.forEach(m =>
       series.push({ label: `${tk} ${m}`, color: TK_COLOR[tk], dash: MODEL_DASH[m], data: cum(tk, mode, m) })));
-    makeChart(mode === "signal" ? "chartSignal" : "chartAlways", mode === "signal" ? "legendSignal" : "legendAlways", labels, series);
+    makeChart("chart" + key, "legend" + key, labels, series);
   }
 
   // Scorecard: sorted by win rate (ties broken by total P&L), models with no trades last
@@ -365,28 +463,31 @@ function render() {
     const w = ts.filter(t => t.pnl_usd > 0), l = ts.filter(t => t.pnl_usd <= 0);
     rowsSc.push({ tk, mode, m, d, n: ts.length, wr: ts.length ? w.length / ts.length : -1, p: sum(ts.map(t => t.pnl_usd)),
       avgW: w.length ? mean(w.map(t => t.pnl_usd)) : null, avgL: l.length ? mean(l.map(t => t.pnl_usd)) : null,
-      bigW: w.length ? Math.max(...w.map(t => t.pnl_usd)) : null, bigL: l.length ? Math.min(...l.map(t => t.pnl_usd)) : null });
+      bigW: w.length ? Math.max(...w.map(t => t.pnl_usd)) : null, bigL: l.length ? Math.min(...l.map(t => t.pnl_usd)) : null, hold: ts.length ? mean(ts.map(held)) : null });
   })));
   rowsSc.sort((a, b) => b.wr - a.wr || b.p - a.p);
+  const FS = FILTERS.score, rowsShown = rowsSc.filter(r => passes(FS, r.mode, r.tk, r.m));
   const cellUsd = (v, c) => v == null ? `<td class="num">–</td>` : `<td class="num ${c}">${usd(v)}</td>`;
   document.getElementById("scorecard").innerHTML =
-    `<tr><th>#</th><th>Group</th><th>Model</th><th>Exit rule</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg win</th><th class="num">Avg loss</th><th class="num">Total P&amp;L</th><th class="num">Biggest win</th><th class="num">Biggest loss</th></tr>` +
-    rowsSc.map((r, i) => `<tr><td>${r.n ? i + 1 : "–"}</td><td><b>${r.tk}</b> <span class="mode ${r.mode}">${MODE_NAME[r.mode]}</span></td><td>${r.m}</td><td>${r.d}</td><td class="num">${r.n}</td>
+    `<tr><th>#</th><th>Group</th><th>Model</th><th class="num">Trades</th><th class="num">Avg hold</th><th class="num">Win rate</th><th class="num">Avg win</th><th class="num">Avg loss</th><th class="num">Total P&amp;L</th><th class="num">Biggest win</th><th class="num">Biggest loss</th><th>Exit rule</th></tr>` +
+    rowsShown.map((r, i) => `<tr><td>${r.n ? i + 1 : "–"}</td><td><b>${r.tk}</b> <span class="mode ${r.mode}">${MODE_NAME[r.mode]}</span></td><td>${r.m}</td><td class="num">${r.n}</td><td class="num">${dur(r.hold)}</td>
       <td class="num">${r.n ? Math.round(r.wr * 100) + "%" : "–"}<span class="bar"><span style="width:${r.n ? Math.round(r.wr * 100) : 0}%"></span></span></td>
       ${cellUsd(r.avgW, "pos")}${cellUsd(r.avgL, "neg")}
-      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}</tr>`).join("");
+      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}<td class="hint">${r.d} · ${HOLD[r.mode][r.m]}m hold</td></tr>`).join("");
 
   // Log
   const order = x => x.date + x.entry_time + x.ticker + modeOf(x) + x.model;
-  const rows = [...trades].sort((a, b) => order(b).localeCompare(order(a))).slice(0, 80);
-  document.getElementById("logCount").textContent = trades.length > 80 ? `Latest 80 of ${trades.length}` : "";
+  const FL = FILTERS.log, logTrades = trades.filter(t => passes(FL, modeOf(t), t.ticker, t.model));
+  const rows = [...logTrades].sort((a, b) => order(b).localeCompare(order(a))).slice(0, 80);
+  document.getElementById("logCount").textContent = logTrades.length > 80 ? `Latest 80 of ${logTrades.length}` : `${logTrades.length} trade${logTrades.length === 1 ? "" : "s"}`;
   document.getElementById("log").innerHTML = rows.length
-    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">Option return</th><th class="num">P&amp;L</th><th>Exit</th><th>Time (ET)</th></tr>` +
-      rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.reason}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td></tr>`).join("")
-    : `<tr><td class="empty">No trades yet. They'll show up here after the first morning.</td></tr>`;
+    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">Option return</th><th class="num">P&amp;L</th><th>Exit</th><th>Time (ET)</th><th class="num">Held</th></tr>` +
+      rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}${t.fallback ? '<span class="tag est">ETF est.</span>' : ""}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.reason}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td><td class="num">${dur(held(t))}</td></tr>`).join("")
+    : `<tr><td class="empty">${trades.length ? "No trades match these filters." : "No trades yet. They'll show up here after the first morning."}</td></tr>`;
 }
 
 document.getElementById("showTest").addEventListener("change", render);
+document.getElementById("showFallback").addEventListener("change", render);
 if (window.Chart) Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
 load();
 </script>
