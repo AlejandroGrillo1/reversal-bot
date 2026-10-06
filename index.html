@@ -150,6 +150,10 @@
   th.sortable .arr { margin-left: 4px; font-size: 10px; opacity: .45; }
   th.sorted { color: var(--ink); }
   th.sorted .arr { opacity: 1; }
+  .card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .life { text-align: right; white-space: nowrap; }
+  .life span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .life strong { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.1; }
   .notes-card { margin-top: 2px; flex: 1 1 100%; }
   .notes-table td, .notes-table th { white-space: normal; vertical-align: top; font-size: 13px; color: var(--ink-2); }
   .notes-table td:first-child { white-space: nowrap; width: 1%; color: var(--ink); }
@@ -206,22 +210,22 @@
         <div class="legend" id="legendAvg"></div>
       </div>
       <div class="card chart-card" id="cardSignal">
-        <h3>Signal models</h3><p>Trend, VWAP cross, and RSI all line up; green exits at 5 min</p>
+        <div class="card-top"><h3>Signal models</h3><div class="life" id="lifeSignal"></div></div><p>Trend, VWAP cross, and RSI all line up; green exits at 5 min</p>
         <div class="chart-box"><canvas id="chartSignal" aria-label="Signal models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendSignal"></div>
       </div>
       <div class="card chart-card" id="cardRetrace">
-        <h3>Retrace models</h3><p>Trend and RSI, then a 33% pullback from the morning high or low; green exits at 5 min</p>
+        <div class="card-top"><h3>Retrace models</h3><div class="life" id="lifeRetrace"></div></div><p>Trend and RSI, then a 33% pullback from the morning high or low; green exits at 5 min</p>
         <div class="chart-box"><canvas id="chartRetrace" aria-label="Retrace models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendRetrace"></div>
       </div>
       <div class="card chart-card" id="cardStaggered">
-        <h3>Staggered models</h3><p>Same signal as Signal, but green exits at 5 / 12 / 20 min</p>
+        <div class="card-top"><h3>Staggered models</h3><div class="life" id="lifeStaggered"></div></div><p>Same signal as Signal, but green exits at 5 / 12 / 20 min</p>
         <div class="chart-box"><canvas id="chartStaggered" aria-label="Staggered models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendStaggered"></div>
       </div>
       <div class="card chart-card" id="cardAlways">
-        <h3>Always-trade models</h3><p>Fade the morning move at 7:28 PT every day, no filters</p>
+        <div class="card-top"><h3>Always-trade models</h3><div class="life" id="lifeAlways"></div></div><p>Fade the morning move at 7:28 PT every day, no filters</p>
         <div class="chart-box"><canvas id="chartAlways" aria-label="Always-trade models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendAlways"></div>
       </div>
@@ -549,6 +553,10 @@ function render() {
     card.classList.toggle("hidden", !FP.groups.has(mode));
     card.classList.toggle("full", shown.length % 2 === 1 && shown[shown.length - 1] === mode);
     if (!FP.groups.has(mode)) continue;
+    // Lifetime P&L for this group (respects the ticker/model filters)
+    const gt = trades.filter(t => modeOf(t) === mode && FP.tickers.has(t.ticker) && FP.models.has(t.model)), gp = sum(gt.map(t => t.pnl_usd));
+    const filtered = pickedTk.length < TICKERS.length || pickedModels.length < MODEL_KEYS.length;
+    document.getElementById("life" + key).innerHTML = `<span>Lifetime P&amp;L${filtered ? " · filtered" : ""}</span><strong class="${gt.length ? cls(gp) : ""}">${gt.length ? usd(gp) : "–"}</strong>`;
     const series = [];
     pickedTk.forEach(tk => pickedModels.forEach(m =>
       series.push({ label: `${tk} ${m}`, color: TK_COLOR[tk], dash: MODEL_DASH[m], data: cum(tk, mode, m) })));
