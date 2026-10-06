@@ -2,13 +2,32 @@
 10:30 Reversal Bot  —  paper trades SPY and QQQ options around 10:30 ET.
 
 Thesis: the morning move tends to reverse around 10:30 ET (7:30 PT).
-  1. At 10:25 ET, look at the morning trend (price vs. the 9:30 open).
+  1. At 10:22 ET, look at the morning trend (price vs. the 9:30 open).
   2. Up morning  -> wait for price to close below VWAP, then buy puts.
      Down morning -> wait for price to close above VWAP, then buy calls.
-  3. Three models per ticker share the entry but exit differently:
-       A: +1% target / -0.5% stop   B: +2% / -1%   C: +3% / -1.5%
-     (percent of the option's price)
-  4. Anything still open at the time stop gets sold.
+     RSI filter: the morning must also have been stretched (1-min RSI above 70
+     on up mornings / below 30 on down mornings in the last 30 minutes).
+  3. Each contract bought costs about TARGET_COST ($100): the bot picks the
+     strike whose price is closest to $1.00 per share.
+  4. Three models per ticker share the entry but exit differently. Targets
+     are measured on the ETF's move in your favor, not the option's price:
+       Conservative: ETF moves 0.10% your way (stop: 0.05% against)
+       Moderate:     0.25% (stop: 0.125%)
+       Aggressive:   0.40% (stop: 0.20%)
+     P&L is still the real option P&L.
+     Option stop: each model also sells if the option is down 10% / 20% / 35%
+     (Conservative / Moderate / Aggressive), whatever SPY is doing.
+     5-minute rule: once a model has been held HOLD_MINUTES, it sells as soon
+     as the option is green (bid above entry). If it's red at that point, it
+     keeps holding and only sells on a recovery once the option is up at least
+     RECOVERY_MIN_RETURN (3%), or when it hits its target or stop, or at the
+     end-of-day close.
+  5. No time stop: positions ride until their target or stop hits. The only
+     forced exit is the end-of-day close (same-day options expire at 4pm ET).
+
+Each ticker also runs an "always" copy of the three models that skips the
+trend, VWAP and RSI checks and trades every day at 10:28 ET (7:28 PT), betting against
+whichever way the morning moved. That shows whether the signal adds value.
 
 Results are appended to data/results.json, which the website reads.
 """
@@ -25,7 +44,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOptionContractsRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, ContractType, AssetStatus
 from alpaca.data.historical import StockHistoricalDataClient, OptionHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest, OptionLatestQuoteRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest, OptionLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import DataFeed
 
@@ -33,13 +52,27 @@ ET = ZoneInfo("America/New_York")
 
 # ------------------------------ Settings ------------------------------
 TICKERS = ["SPY", "QQQ"]
-MODELS = {"A": (0.01, 0.005), "B": (0.02, 0.01), "C": (0.03, 0.015)}  # (target, stop)
+MODELS = {
+    # (ETF target, ETF stop, option stop). ETF numbers are % moves in SPY/QQQ
+    # (0.0025 = 0.25%). The option stop sells if the option itself is down that
+    # much, sized to roughly the loss the ETF stop would cause, so slow time
+    # decay on a flat day can't bleed a trade past its max loss.
+    "Conservative": (0.0010, 0.0005, 0.10),
+    "Moderate": (0.0025, 0.00125, 0.20),
+    "Aggressive": (0.0040, 0.0020, 0.35),
+}
 CONTRACTS_PER_MODEL = 1
+HOLD_MINUTES = 5              # after this, sell any model that's green
+RECOVERY_MIN_RETURN = 0.03    # if red at the 5-min mark, a recovery must reach +3% before selling
+TARGET_COST = 100            # dollars per contract: picks the option whose price is closest to this
 TREND_THRESHOLD = 0.003        # morning must move 0.3%+ from the open to count as a trend
-WINDOW_START = dtime(10, 25)   # 7:25 PT
-WINDOW_END = dtime(10, 35)     # 7:35 PT
-TIME_STOP = dtime(11, 30)      # sell anything still open (8:30 PT)
-USE_RSI_FILTER = False         # True = also require RSI >70 (up) / <30 (down) in last 30 min
+WINDOW_START = dtime(10, 22)   # 7:22 PT
+WINDOW_END = dtime(10, 40)     # 7:40 PT
+ALWAYS_ENTRY = dtime(10, 28)   # 7:28 PT: when the always-trade models enter
+EOD_CLOSE = dtime(15, 30)      # end-of-day exit, 12:30 PT (options expire at 4pm ET;
+                               # GitHub also caps a run at 6 hours)
+USE_RSI_FILTER = True          # signal models also require RSI >70 (up) / <30 (down) in last 30 min
+MODES = ["signal", "always"]   # signal: needs trend + VWAP cross + RSI. always: trades every day at ALWAYS_ENTRY
 POLL_SECONDS = 10
 RESULTS = Path("data/results.json")
 # ----------------------------------------------------------------------
@@ -96,7 +129,8 @@ def rsi(close, n=14):
 
 
 def pick_contract(symbol, price, kind):
-    """Nearest-expiration (usually same-day) contract with strike closest to price."""
+    """Nearest-expiration contract whose cost is closest to TARGET_COST.
+    Option prices are per share and a contract is 100 shares, so a $1.00 ask = $100."""
     today = now_et().date()
     req = GetOptionContractsRequest(
         underlying_symbols=[symbol],
@@ -104,8 +138,8 @@ def pick_contract(symbol, price, kind):
         expiration_date_gte=today,
         expiration_date_lte=today + timedelta(days=7),
         type=ContractType.CALL if kind == "CALL" else ContractType.PUT,
-        strike_price_gte=str(round(price - 5)),
-        strike_price_lte=str(round(price + 5)),
+        strike_price_gte=str(round(price - 20)),
+        strike_price_lte=str(round(price + 20)),
         limit=1000,
     )
     contracts = trading.get_option_contracts(req).option_contracts
@@ -113,7 +147,35 @@ def pick_contract(symbol, price, kind):
         raise RuntimeError(f"No option contracts found for {symbol}")
     soonest = min(c.expiration_date for c in contracts)
     pool = [c for c in contracts if c.expiration_date == soonest]
-    return min(pool, key=lambda c: abs(float(c.strike_price) - price))
+
+    target = TARGET_COST / 100
+    quotes = options.get_option_latest_quote(
+        OptionLatestQuoteRequest(symbol_or_symbols=[c.symbol for c in pool]))
+    best, best_diff = None, None
+    for c in pool:
+        q = quotes.get(c.symbol)
+        if not q or not q.bid_price or not q.ask_price:
+            continue
+        diff = abs(float(q.ask_price) - target)
+        if best is None or diff < best_diff:
+            best, best_diff = c, diff
+    if best is None:  # no quotes came back: fall back to the at-the-money strike
+        best = min(pool, key=lambda c: abs(float(c.strike_price) - price))
+    print(f"[{symbol}] Picked {best.symbol} (target ${TARGET_COST}/contract)")
+    return best
+
+
+def etf_price(symbol):
+    """Latest traded price of the ETF (free IEX feed)."""
+    trade = stocks.get_stock_latest_trade(
+        StockLatestTradeRequest(symbol_or_symbols=symbol, feed=DataFeed.IEX))[symbol]
+    return float(trade.price)
+
+
+def option_bid(symbol):
+    """Price we could sell at right now."""
+    quote = options.get_option_latest_quote(OptionLatestQuoteRequest(symbol_or_symbols=symbol))[symbol]
+    return float(quote.bid_price) if quote.bid_price else None
 
 
 def option_mid(symbol):
@@ -137,34 +199,39 @@ def market_order(symbol, qty, side):
 
 # ------------------------------- Bot ----------------------------------
 class TickerBot:
-    def __init__(self, symbol):
+    def __init__(self, symbol, mode):
         self.symbol = symbol
+        self.mode = mode
+        self.tag = f"[{symbol} {mode}]"
         self.phase = "wait"          # wait -> watch -> in_trade -> done
         self.direction = None        # "up" / "down" morning
         self.kind = None             # "PUT" / "CALL"
         self.contract = None
         self.entry = None
+        self.etf_entry = None
+        self.red_at_5 = None         # was the option red at the 5-minute mark?
         self.entry_time = None
         self.time_stop = None
         self.open_models = []
         self.errors = 0
-        self.day = {"date": str(now_et().date()), "ticker": symbol, "direction": None,
+        self.day = {"date": str(now_et().date()), "ticker": symbol, "mode": mode, "direction": None,
                     "traded": False, "note": "", "test": TEST_MODE}
 
     def finish(self, note):
         self.day["note"] = note
         self.phase = "done"
-        print(f"[{self.symbol}] {note}")
+        print(f"{self.tag} {note}")
 
     def step(self, now, results):
         if self.phase == "wait":
-            if not TEST_MODE and now.time() < WINDOW_START:
+            start = ALWAYS_ENTRY if self.mode == "always" else WINDOW_START
+            if not TEST_MODE and now.time() < start:
                 return
             bars = get_bars(self.symbol)
             if len(bars) < 5:
                 return
             move = bars["close"].iloc[-1] / bars["open"].iloc[0] - 1
-            if TEST_MODE:
+            if TEST_MODE or self.mode == "always":
                 self.direction = "up" if move >= 0 else "down"
             elif move > TREND_THRESHOLD:
                 self.direction = "up"
@@ -175,8 +242,8 @@ class TickerBot:
                 return self.finish(f"Flat morning ({move:+.2%}), no trade")
             self.day["direction"] = self.direction
             self.kind = "PUT" if self.direction == "up" else "CALL"
-            print(f"[{self.symbol}] Morning {self.direction} {move:+.2%}, watching for VWAP cross")
-            if TEST_MODE:
+            print(f"{self.tag} Morning {self.direction} {move:+.2%}")
+            if TEST_MODE or self.mode == "always":
                 return self.enter(bars["close"].iloc[-1], now)
             self.phase = "watch"
 
@@ -195,17 +262,31 @@ class TickerBot:
         elif self.phase == "in_trade":
             if now >= self.time_stop:
                 for m in list(self.open_models):
-                    self.exit(m, "time stop", results)
+                    self.exit(m, "end of day", results)
             else:
-                mid = option_mid(self.contract)
-                if mid is None:
-                    return
+                px = etf_price(self.symbol)
+                move = px / self.etf_entry - 1
+                if self.kind == "PUT":
+                    move = -move          # puts profit when the ETF falls
+                held_long_enough = now - self.entry_time >= timedelta(minutes=HOLD_MINUTES)
+                bid = option_bid(self.contract)
+                if held_long_enough and bid is not None and self.red_at_5 is None:
+                    self.red_at_5 = bid <= self.entry
+                    print(f"{self.tag} 5-min mark: {'red' if self.red_at_5 else 'green'} (bid {bid:.2f} vs entry {self.entry:.2f})")
+                if self.red_at_5:
+                    sell_ok, why = bid is not None and bid >= self.entry * (1 + RECOVERY_MIN_RETURN), f"recovered +{RECOVERY_MIN_RETURN:.0%}"
+                else:
+                    sell_ok, why = bid is not None and bid > self.entry, "green after 5 min"
                 for m in list(self.open_models):
-                    target, stop = MODELS[m]
-                    if mid >= self.entry * (1 + target):
-                        self.exit(m, "target", results)
-                    elif mid <= self.entry * (1 - stop):
-                        self.exit(m, "stop", results)
+                    target, stop, opt_stop = MODELS[m]
+                    if move >= target:
+                        self.exit(m, "target", results, px)
+                    elif move <= -stop:
+                        self.exit(m, "stop", results, px)
+                    elif bid is not None and bid <= self.entry * (1 - opt_stop):
+                        self.exit(m, "option stop", results, px)
+                    elif held_long_enough and self.red_at_5 is not None and sell_ok:
+                        self.exit(m, why, results, px)
             if not self.open_models:
                 self.finish(f"Morning {self.direction}, bought {self.kind}s, all models closed")
 
@@ -213,29 +294,37 @@ class TickerBot:
         c = pick_contract(self.symbol, price, self.kind)
         self.contract = c.symbol
         self.entry = market_order(c.symbol, CONTRACTS_PER_MODEL * len(MODELS), OrderSide.BUY)
+        self.etf_entry = etf_price(self.symbol)
         self.entry_time = now_et()
         self.time_stop = (now + timedelta(minutes=10)) if TEST_MODE else \
-            datetime.combine(now.date(), TIME_STOP, tzinfo=ET)
+            datetime.combine(now.date(), EOD_CLOSE, tzinfo=ET)
         self.open_models = list(MODELS)
         self.day["traded"] = True
         self.phase = "in_trade"
-        print(f"[{self.symbol}] Bought {self.contract} @ {self.entry:.2f}")
+        print(f"{self.tag} Bought {self.contract} @ {self.entry:.2f} ({self.symbol} at {self.etf_entry:.2f})")
 
-    def exit(self, model, reason, results):
+    def exit(self, model, reason, results, etf_now=None):
         px = market_order(self.contract, CONTRACTS_PER_MODEL, OrderSide.SELL)
+        if etf_now is None:
+            try:
+                etf_now = etf_price(self.symbol)
+            except Exception:
+                etf_now = self.etf_entry
         self.open_models.remove(model)
         results["trades"].append({
-            "date": self.day["date"], "ticker": self.symbol, "model": model,
+            "date": self.day["date"], "ticker": self.symbol, "mode": self.mode, "model": model,
             "morning": self.direction, "option": self.kind, "contract": self.contract,
             "entry": round(self.entry, 4), "exit": round(px, 4),
             "pnl_pct": round(px / self.entry - 1, 4),
             "pnl_usd": round((px - self.entry) * 100 * CONTRACTS_PER_MODEL, 2),
+            "etf_entry": round(self.etf_entry, 2), "etf_exit": round(etf_now, 2),
+            "etf_move": round(etf_now / self.etf_entry - 1, 5),
             "reason": reason,
             "entry_time": self.entry_time.strftime("%H:%M:%S"),
             "exit_time": now_et().strftime("%H:%M:%S"),
             "test": TEST_MODE,
         })
-        print(f"[{self.symbol}] Model {model} sold @ {px:.2f} ({reason})")
+        print(f"{self.tag} {model} sold @ {px:.2f} ({reason})")
 
 
 def main():
@@ -245,7 +334,7 @@ def main():
         print("Market is closed today, exiting.")
         return
     if not TEST_MODE:
-        # Two cron times cover daylight saving; only the one landing 9:30-10:25 ET runs.
+        # Two cron times cover daylight saving; only the one landing 9:30-10:22 ET runs.
         if not (dtime(9, 30) <= now.time() < WINDOW_START):
             print(f"Started at {now:%H:%M} ET, outside start window, exiting.")
             return
@@ -253,8 +342,8 @@ def main():
             print("Already ran today, exiting.")
             return
 
-    bots = [TickerBot(s) for s in TICKERS]
-    hard_stop = datetime.combine(now.date(), TIME_STOP, tzinfo=ET) + timedelta(minutes=20)
+    bots = [TickerBot(s, mode) for s in TICKERS for mode in MODES]
+    hard_stop = datetime.combine(now.date(), EOD_CLOSE, tzinfo=ET) + timedelta(minutes=10)
     if TEST_MODE:
         hard_stop = now + timedelta(minutes=30)
     try:
