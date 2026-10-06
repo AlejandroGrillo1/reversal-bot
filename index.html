@@ -180,7 +180,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -247,8 +247,13 @@ const SOURCES = {
   levered: { link: "srcLevered", file: "data/backtest_levered.json", label: "3× ETF backtest · " },
   nohold: { link: "srcNohold", file: "data/backtest_levered_nohold.json", label: "3× ETF, no 5-min exit · " },
   experimental: { link: "srcExperimental", file: "data/backtest_experimental.json", label: "Experimental · " },
+  exp5y: { link: "srcExp5y", file: "data/backtest_experimental_5y.json", label: "Experimental, 5 years · " },
+  expdown: { link: "srcExpDown", file: "data/backtest_experimental_down.json", label: "Experimental, 2022–23 · " },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
+const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown";
+const EXP_TITLE = { experimental: "Experimental strategies, this year", exp5y: "Experimental strategies, last 5 years",
+  expdown: "Experimental strategies, 2022–23 round trip (a bear market, then a recovery to about where it started)" };
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
@@ -457,6 +462,8 @@ async function load() {
     document.getElementById("srcLevered").href = "?demo&data=levered";
     document.getElementById("srcNohold").href = "?demo&data=nohold";
     document.getElementById("srcExperimental").href = "?demo&data=experimental";
+    document.getElementById("srcExp5y").href = "?demo&data=exp5y";
+    document.getElementById("srcExpDown").href = "?demo&data=expdown";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -491,10 +498,21 @@ async function load() {
   if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
-    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : SRC === "nohold" ? "3× ETF backtest, no 5-min exit" : SRC === "experimental" ? "Experimental strategies" : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
+    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : SRC === "nohold" ? "3× ETF backtest, no 5-min exit" : isExp(SRC) ? EXP_TITLE[SRC] : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
       (SRC === "levered" ? `Same entries and exits as the options backtest, only the instrument changes.` :
        SRC === "nohold" ? `Compare with the 3× ETFs page: same entries, only the 5-minute hold exits are removed.` :
-       SRC === "experimental" ? `Ladder groups show trades on the day they closed. Anything still held is sold at the last close ("closed at run end") so totals are current; the scorecard's Open P&L column shows how those positions did.` : `Treat dollars as estimates; use it to compare models.`);
+       isExp(SRC) ? `Ladder groups show trades on the day they closed. Anything still held is sold at the last close ("closed at run end") so totals are current; the scorecard's Open P&L column shows how those positions did.` : `Treat dollars as estimates; use it to compare models.`);
+    if (m.ladder_stats && m.ladder_stats.length) {
+      const nm = k => (m.groups.find(g => g.key === k) || {}).name || k;
+      const bh = Object.fromEntries((m.buy_hold || []).map(b => [b.ticker, b]));
+      banner.innerHTML += `<div class="table-wrap" style="margin-top:12px"><table class="notes-table"><tr><th>Ladder</th><th class="num">Total P&amp;L</th><th class="num">Most money in at once</th><th class="num">Return on that money</th><th class="num">Worst paper loss</th><th class="num">Buy &amp; hold the 3× ETF</th></tr>` +
+        m.ladder_stats.map(r => `<tr><td><b>${r.ticker}</b> ${nm(r.mode)}</td><td class="num ${cls(r.pnl)}">${usd(r.pnl)}</td>
+          <td class="num">$${r.max_in.toFixed(0)} <small class="hint">(${r.max_rungs} rung${r.max_rungs === 1 ? "" : "s"})</small></td>
+          <td class="num ${r.max_in ? cls(r.pnl) : ""}">${r.max_in ? pct(r.pnl / r.max_in) : "–"}</td>
+          <td class="num ${r.worst_open < 0 ? "neg" : ""}">${r.worst_open < 0 ? usd(r.worst_open) + ` <small class="hint">${short(r.worst_date)}</small>` : "–"}</td>
+          <td class="num">${bh[r.ticker] ? `<span class="${cls(bh[r.ticker].etf_ret)}">${pct(bh[r.ticker].etf_ret)}</span> <small class="hint">${bh[r.ticker].etf}</small>` : "–"}</td></tr>`).join("") +
+        `</table></div><p class="hint" style="margin:6px 0 0">Return on that money = total P&amp;L ÷ the most it ever had invested. Worst paper loss = the deepest the open rungs were underwater at a close. Buy &amp; hold = $100 in the 3× ETF on day one, sold on the last day.</p>`;
+    }
     document.getElementById("footer").textContent = "Backtest results: simulated, not real trades";
   }
   if (DEMO) document.getElementById("footer").textContent = "Demo mode: sample data, not real results";
@@ -547,7 +565,12 @@ function render() {
   const dates = [...new Set(days.map(d => d.date))].sort();
   const latest = dates[dates.length - 1];
   if (!selected || !dates.includes(selected)) selected = latest;
-  const dayPnl = d => sum(trades.filter(t => t.date === d).map(t => t.pnl_usd));
+  const byDay = new Map(), bySeries = new Map();
+  for (const t of trades) {
+    byDay.set(t.date, (byDay.get(t.date) || 0) + t.pnl_usd);
+    const k = `${t.date}|${t.ticker}|${t.model}|${modeOf(t)}`; bySeries.set(k, (bySeries.get(k) || 0) + t.pnl_usd);
+  }
+  const dayPnl = d => byDay.get(d) || 0;
   const tradedDays = [...new Set(trades.map(t => t.date))].sort();
 
   // Hero (follows the selected day)
@@ -637,7 +660,7 @@ function render() {
 
   // Charts
   const labels = tradedDays.map(short);
-  const cum = (tk, mode, m) => { let run = 0; return tradedDays.map(d => (run += sum(trades.filter(t => t.date === d && t.ticker === tk && t.model === m && modeOf(t) === mode).map(t => t.pnl_usd)))); };
+  const cum = (tk, mode, m) => { let run = 0; return tradedDays.map(d => (run += bySeries.get(`${d}|${tk}|${m}|${mode}`) || 0)); };
   const FP = FILTERS.perf, pickedTk = TICKERS.filter(tk => FP.tickers.has(tk));
   const pickedFor = mode => modelsOf(mode).filter(m => FP.models.has(m));
   const avgSeries = [];
