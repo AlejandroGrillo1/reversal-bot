@@ -178,7 +178,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -263,7 +263,12 @@
 <script>
 const PARAMS = new URLSearchParams(location.search);
 const DEMO = PARAMS.has("demo");
-let SRC = PARAMS.get("data") === "backtest" ? "backtest" : "live";
+const SOURCES = {
+  live: { link: "srcLive", file: "data/results.json", label: "" },
+  backtest: { link: "srcBacktest", file: "data/backtest.json", label: "Backtest · " },
+  levered: { link: "srcLevered", file: "data/backtest_levered.json", label: "3× ETF backtest · " },
+};
+let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
@@ -412,11 +417,11 @@ function fakeData() {
 }
 
 async function load() {
-  document.getElementById("srcLive").classList.toggle("on", SRC === "live");
-  document.getElementById("srcBacktest").classList.toggle("on", SRC === "backtest");
-  if (PARAMS.has("demo")) {   // keep demo mode when switching between Live and Backtest
+  Object.entries(SOURCES).forEach(([k, s]) => document.getElementById(s.link).classList.toggle("on", SRC === k));
+  if (PARAMS.has("demo")) {   // keep demo mode when switching pages
     document.getElementById("srcLive").href = "?demo";
     document.getElementById("srcBacktest").href = "?demo&data=backtest";
+    document.getElementById("srcLevered").href = "?demo&data=levered";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -424,16 +429,19 @@ async function load() {
   raw = { trades: [], days: [], errors: [] }; selected = null;
   if (DEMO) {
     raw = fakeData();
-    if (SRC === "backtest") { banner.classList.remove("hidden"); banner.innerHTML = "<b>Backtest (demo)</b> · Sample data. On your real site this shows the results of Actions → Backtest."; }
+    if (SRC === "levered") raw.trades = raw.trades.map(t => { const fav = t.option === "PUT" ? -t.etf_move : t.etf_move, r = 3 * fav - 0.0002;
+      return { ...t, contract: (t.ticker === "SPY" ? (t.option === "PUT" ? "SPXU" : "UPRO") : (t.option === "PUT" ? "SQQQ" : "TQQQ")) + " (3x est.)",
+        side: t.option === "PUT" ? "inverse 3×" : "long 3×", entry: 100, exit: +(100 * (1 + r)).toFixed(2), pnl_pct: r, pnl_usd: +(100 * r).toFixed(2), levered: true }; });
+    if (SRC !== "live") { banner.classList.remove("hidden"); banner.innerHTML = `<b>${SRC === "levered" ? "3× ETF backtest" : "Backtest"} (demo)</b> · Sample data. On your real site this shows the results of Actions → Backtest.`; }
   }
   else {
-    const file = SRC === "backtest" ? "data/backtest.json" : "data/results.json";
+    const file = SOURCES[SRC].file;
     try {
       const r = await fetch(file + "?t=" + Date.now());
       if (!r.ok) throw new Error(r.status);
       raw = await r.json();
     } catch (e) {
-      if (SRC === "backtest") {
+      if (SRC !== "live") {
         banner.classList.remove("hidden");
         banner.innerHTML = "<b>No backtest yet.</b> On GitHub, go to Actions → Backtest → Run workflow. Results show up here when it finishes.";
         document.getElementById("heroSub").textContent = "Run the backtest to fill this page in.";
@@ -441,11 +449,11 @@ async function load() {
       return;
     }
   }
-  if (SRC === "backtest" && raw.meta) {
+  if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
-    banner.innerHTML = `<b>Backtest</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
-      `Treat dollars as estimates; use it to compare models.`;
+    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
+      (SRC === "levered" ? `Same entries and exits as the options backtest, only the instrument changes.` : `Treat dollars as estimates; use it to compare models.`);
     document.getElementById("footer").textContent = "Backtest results: simulated, not real trades";
   }
   if (DEMO) document.getElementById("footer").textContent = "Demo mode: sample data, not real results";
@@ -480,7 +488,7 @@ function boardHTML(st, mode) {
     for (const m of MODEL_KEYS) {
       const t = st.find(x => x.ticker === tk && x.model === m && modeOf(x) === mode);
       html += t
-        ? `<div class="cell ${t.pnl_usd >= 0 ? "win" : "lose"}"><div class="big ${cls(t.pnl_usd)}">${pct(t.pnl_pct)}</div><div class="small">${t.fallback ? '<span class="tag est" style="margin:0 0 4px">ETF est.</span><br>' : ""}${usd(t.pnl_usd)} · ${t.option} · ${t.reason}${t.etf_move != null ? `<br>${t.ticker} ${pct2(t.etf_move)}` : ""}<br>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)} ET</div></div>`
+        ? `<div class="cell ${t.pnl_usd >= 0 ? "win" : "lose"}"><div class="big ${cls(t.pnl_usd)}">${pct(t.pnl_pct)}</div><div class="small">${t.fallback ? '<span class="tag est" style="margin:0 0 4px">ETF est.</span><br>' : ""}${usd(t.pnl_usd)} · ${t.side || t.option} · ${t.reason}${t.etf_move != null ? `<br>${t.ticker} ${pct2(t.etf_move)}` : ""}<br>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)} ET</div></div>`
         : `<div class="cell none">No trade</div>`;
     }
   }
@@ -509,7 +517,7 @@ function render() {
     const num = document.getElementById("heroNum");
     num.textContent = t.length ? usd(p) : "No trade";
     num.className = "hero-num " + (t.length ? cls(p) : "");
-    document.getElementById("heroLabel").textContent = (SRC === "backtest" ? "Backtest · " : "") + (selected === latest ? "Latest session · " : "Session · ") + short(selected);
+    document.getElementById("heroLabel").textContent = SOURCES[SRC].label + (selected === latest ? "Latest session · " : "Session · ") + short(selected);
     document.getElementById("heroSub").textContent = t.length
       ? `${t.filter(x => x.pnl_usd > 0).length} of ${t.length} trades closed green. ` + MODES.map(md => {
           const g = t.filter(x => modeOf(x) === md);
@@ -646,7 +654,7 @@ function render() {
   const rows = [...logTrades].sort((a, b) => order(b).localeCompare(order(a))).slice(0, 80);
   document.getElementById("logCount").textContent = logTrades.length > 80 ? `Latest 80 of ${logTrades.length}` : `${logTrades.length} trade${logTrades.length === 1 ? "" : "s"}`;
   document.getElementById("log").innerHTML = rows.length
-    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">Option return</th><th class="num">P&amp;L</th><th>Time (ET)</th><th class="num">Held</th><th class="num">ETF at buy</th><th class="num">ETF at sell</th><th>Exit reason</th></tr>` +
+    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">${SRC === "levered" ? "Return" : "Option return"}</th><th class="num">P&amp;L</th><th>Time (ET)</th><th class="num">Held</th><th class="num">ETF at buy</th><th class="num">ETF at sell</th><th>Exit reason</th></tr>` +
       rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}${t.fallback ? '<span class="tag est">ETF est.</span>' : ""}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td><td class="num">${dur(held(t))}</td><td class="num">${t.etf_entry != null ? "$" + Number(t.etf_entry).toFixed(2) : "–"}</td><td class="num">${t.etf_exit != null ? "$" + Number(t.etf_exit).toFixed(2) : "–"}</td><td>${t.reason}</td></tr>`).join("")
     : `<tr><td class="empty">${trades.length ? "No trades match these filters." : "No trades yet. They'll show up here after the first morning."}</td></tr>`;
 }
@@ -658,9 +666,9 @@ document.getElementById("scorecard").addEventListener("click", e => {
   render();
 });
 // Switch Live / Backtest in place (no page reload), and update the address if the browser allows it
-["srcLive", "srcBacktest"].forEach(id => document.getElementById(id).addEventListener("click", e => {
+Object.entries(SOURCES).forEach(([key, s]) => document.getElementById(s.link).addEventListener("click", e => {
   e.preventDefault();
-  const next = id === "srcBacktest" ? "backtest" : "live";
+  const next = key;
   if (next === SRC) return;
   SRC = next;
   // Update the address bar on the real site only (not inside an embedded preview)
