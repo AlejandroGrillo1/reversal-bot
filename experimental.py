@@ -27,8 +27,13 @@ Pricing (same method as the other 3x pages)
   Dip trades: real 3x ETF closing prices, so multi-week drift is included.
   Every buy and sell pays SLIPPAGE per share.
 
-The daily GitHub Action re-runs this from START after each close, so the page
-is always up to date.      python experimental.py [START_DATE]
+Runs (each one feeds its own dashboard tab):
+    python experimental.py 2026-01-01 "" backtest_experimental.json        # this year (daily)
+    python experimental.py 2021-10-01 "" backtest_experimental_5y.json     # last 5 years
+    python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json
+          # the 2022-23 round trip: SPY/QQQ fell about 25-35%, then finished
+          # roughly where they started
+Arguments: START  END (blank = latest close)  OUTPUT FILE NAME in data/
 """
 
 import json
@@ -55,7 +60,7 @@ LADDERS = {"dip5": 0.05, "ladder3": 0.03}   # group key -> step between buys
 SELL_BELOW_HIGH = 0.01          # sell all rungs at 1% under the high locked in at the first buy
 LADDER_MAX_RUNGS = None         # None = no cap
 
-OUT = Path(__file__).resolve().parent / "data" / "backtest_experimental.json"
+DATA_DIR = Path(__file__).resolve().parent / "data"
 TICKERS = list(PAIRS)
 ALL_SYMBOLS = TICKERS + [s for p in PAIRS.values() for s in (p["bull"], p["bear"])]
 
@@ -110,6 +115,7 @@ class Engine:
     def __init__(self):
         self.trades, self.days, self.open = [], [], []
         self.ladder = {key: {tk: {"H": None} for tk in TICKERS} for key in LADDERS}
+        self.risk = {key: {tk: {"max_in": 0.0, "worst_open": 0.0, "worst_date": None, "max_rungs": 0} for tk in TICKERS} for key in LADDERS}
         self.edge = {t: {tk: {"n": 0, "rev": 0} for tk in TICKERS} for t in ENTRY_TIMES}
 
     # --- helpers
@@ -124,7 +130,7 @@ class Engine:
                "pnl_usd": round((exit_fill - entry_fill) * shares, 2),
                "etf_entry": round(und_in, 2), "etf_exit": round(und_out, 2),
                "etf_move": round(und_out / und_in - 1, 5), "reason": reason,
-               "entry_time": t_in + ":00", "exit_time": t_out + ":00", "test": False}
+               "entry_time": t_in + ":00", "exit_time": t_out + ":00"}
         if entry_date:
             rec["entry_date"], rec["exit_date"] = entry_date, exit_date
         self.trades.append(rec)
@@ -222,6 +228,14 @@ class Engine:
                     else:
                         note = (f"{under:.1f}% under its yearly high" if under > 0 else "Above its yearly high") + f"; first buy at {step * 100:.0f}% under"
                 self.days.append({"date": day, "ticker": tk, "mode": key, "direction": "", "traded": traded, "note": note})
+                # risk: money tied up and the worst paper loss along the way (at today's close)
+                held = [p for p in self.open if p["mode"] == key and p["ticker"] == tk]
+                r = self.risk[key][tk]
+                r["max_in"] = max(r["max_in"], len(held) * TRADE_DOLLARS)
+                r["max_rungs"] = max(r["max_rungs"], len(held))
+                unreal = sum((e - SLIPPAGE - p["entry_fill"]) * TRADE_DOLLARS / p["entry_fill"] for p in held)
+                if unreal < r["worst_open"]:
+                    r["worst_open"], r["worst_date"] = round(unreal, 2), day
 
     def still_open(self, day, bars):
         """Anything the dip bots still hold is sold at the last close, so the totals show
@@ -298,37 +312,69 @@ class AlpacaData:
         return out
 
 
-def run(data, start):
+def run(data, start, end=None):
+    """Replays START..END one month at a time (keeps memory low on long runs)."""
     now = dt.datetime.now(ET)
-    end = now.date() if now.time() >= dt.time(16, 5) else now.date() - dt.timedelta(days=1)
+    latest = now.date() if now.time() >= dt.time(16, 5) else now.date() - dt.timedelta(days=1)
+    end = min(end or latest, latest)
     closes = data.daily_closes(TICKERS, start - dt.timedelta(days=400), end)
     days = [d for d, _ in closes.get("SPY", []) if start.isoformat() <= d <= end.isoformat()]
     print(f"{len(days)} trading days: {days[0]} .. {days[-1]}")
-    bars = data.minute_bars(ALL_SYMBOLS, days)
     eng = Engine()
-    for d in days:
-        if not bars[d].get("SPY"):
-            print(f"  {d}: no data, skipped"); continue
-        high52 = {}
-        for tk in TICKERS:
-            prior = [c for dd, c in closes.get(tk, []) if dd < d][-LOOKBACK:]
-            high52[tk] = max(prior) if len(prior) >= 20 else None
-        prev_close = {tk: next((c for dd, c in reversed(closes.get(tk, [])) if dd < d), None) for tk in TICKERS}
-        eng.intraday(d, bars[d], prev_close)
-        eng.dips(d, bars[d], high52)
-    eng.still_open(days[-1], bars[days[-1]])
+    first_px, last_px, last_bars = {}, {}, None
+    for mo in sorted({d[:7] for d in days}):
+        md = [d for d in days if d.startswith(mo)]
+        bars = data.minute_bars(ALL_SYMBOLS, md)
+        for d in md:
+            if not bars[d].get("SPY"):
+                print(f"  {d}: no data, skipped"); continue
+            high52, prev_close = {}, {}
+            for tk in TICKERS:
+                prior = [c for dd, c in closes.get(tk, []) if dd < d]
+                high52[tk] = max(prior[-LOOKBACK:]) if len(prior) >= 20 else None
+                prev_close[tk] = prior[-1] if prior else None
+            eng.intraday(d, bars[d], prev_close)
+            eng.dips(d, bars[d], high52)
+            for tk, pair in PAIRS.items():          # for the buy-and-hold comparison
+                for sym, t in ((tk, None), (pair["bull"], None)):
+                    b = bars[d].get(sym, {})
+                    if sym not in first_px and price_at(b, "09:30"):
+                        first_px[sym] = price_at(b, "09:30")
+                    if price_at(b, EOD_TIME):
+                        last_px[sym] = price_at(b, EOD_TIME)
+            last_bars, last_day = bars[d], d
+    eng.still_open(last_day, last_bars)
+    buy_hold = []
+    for tk, pair in PAIRS.items():
+        etf = pair["bull"]
+        if first_px.get(etf) and last_px.get(etf):
+            buy_hold.append({"ticker": tk, "etf": etf,
+                             "und_ret": round(last_px[tk] / first_px[tk] - 1, 4),
+                             "etf_ret": round((last_px[etf] - SLIPPAGE) / (first_px[etf] + SLIPPAGE) - 1, 4)})
+    ladder_stats = []
+    for key, by_tk in eng.risk.items():
+        for tk, r in by_tk.items():
+            pnl = sum(t["pnl_usd"] for t in eng.trades if t["mode"] == key and t["ticker"] == tk)
+            ladder_stats.append({"mode": key, "ticker": tk, "max_in": r["max_in"], "max_rungs": r["max_rungs"],
+                                 "worst_open": r["worst_open"], "worst_date": r["worst_date"], "pnl": round(pnl, 2)})
+    bh = "; ".join(f"{b['ticker']} {b['und_ret'] * 100:+.1f}%, {b['etf']} {b['etf_ret'] * 100:+.1f}%" for b in buy_hold)
     meta = {
         "generated": dt.datetime.now(ET).strftime("%Y-%m-%d %H:%M ET"),
-        "start": days[0], "end": days[-1], "trading_days": len(days), "feed": data.feed,
-        "note": f"{LEV}x ETFs, ${TRADE_DOLLARS:.0f} per buy, ${SLIPPAGE} per share each way for the spread. " + eng.edge_note(),
+        "start": days[0], "end": last_day, "trading_days": len(days), "feed": data.feed,
+        "note": f"{LEV}x ETFs, ${TRADE_DOLLARS:.0f} per buy, ${SLIPPAGE} per share each way for the spread. "
+                f"Buy and hold over this period: {bh}. " + eng.edge_note(),
         "groups": [{k: g[k] for k in ("key", "name", "desc", "color", "models")} for g in GROUPS],
+        "ladder_stats": ladder_stats, "buy_hold": buy_hold,
     }
     return {"meta": meta, "trades": eng.trades, "days": eng.days, "errors": []}
 
 
 if __name__ == "__main__":
-    start = dt.date.fromisoformat(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else START)
-    result = run(AlpacaData(), start)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".tmp"); tmp.write_text(json.dumps(result, indent=1)); os.replace(tmp, OUT)
-    print(f"Wrote {OUT.name}: {len(result['trades'])} trades")
+    args = sys.argv[1:] + ["", "", ""]
+    start = dt.date.fromisoformat(args[0] or START)
+    end = dt.date.fromisoformat(args[1]) if args[1] else None
+    out = DATA_DIR / (args[2] or "backtest_experimental.json")
+    result = run(AlpacaData(), start, end)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, out)
+    print(f"Wrote {out.name}: {len(result['trades'])} trades, {out.stat().st_size / 1e6:.1f} MB")
