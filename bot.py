@@ -85,7 +85,7 @@ RECOVERY_MIN_RETURN = 0.03    # if red at the hold mark, a recovery must reach +
 TARGET_COST = 100            # dollars per contract: picks the option whose price is closest to this
 TREND_THRESHOLD = 0.003        # morning must move 0.3%+ from the open to count as a trend
 WINDOW_START = dtime(10, 22)   # 7:22 PT
-WINDOW_END = dtime(10, 40)     # 7:40 PT
+WINDOW_END = dtime(10, 50)     # 7:50 PT
 ALWAYS_ENTRY = dtime(10, 28)   # 7:28 PT: when the always-trade models enter
 EOD_CLOSE = dtime(15, 30)      # end-of-day exit, 12:30 PT (options expire at 4pm ET;
                                # GitHub also caps a run at 6 hours)
