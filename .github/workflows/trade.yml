@@ -3,9 +3,9 @@ name: Daily paper trade
 on:
   schedule:
     # Cron is in UTC. Two times cover daylight saving; the bot only runs
-    # the one that lands between 9:30 and 10:25 ET (the other exits instantly).
-    - cron: "40 13 * * 1-5"
-    - cron: "40 14 * * 1-5"
+    # the one that lands between 9:30 and 10:22 ET (the other exits instantly).
+    - cron: "50 13 * * 1-5"
+    - cron: "50 14 * * 1-5"
   workflow_dispatch:
     inputs:
       test_mode:
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
