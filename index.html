@@ -145,6 +145,11 @@
   .grp.open .grp-body { display: block; }
   .grp-body .board { margin-top: 12px; }
   .sess-tools { display: flex; gap: 8px; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--ink); }
+  th.sortable .arr { margin-left: 4px; font-size: 10px; opacity: .45; }
+  th.sorted { color: var(--ink); }
+  th.sorted .arr { opacity: 1; }
   .notes-card { margin-top: 2px; flex: 1 1 100%; }
   .notes-table td, .notes-table th { white-space: normal; vertical-align: top; font-size: 13px; color: var(--ink-2); }
   .notes-table td:first-child { white-space: nowrap; width: 1%; color: var(--ink); }
@@ -224,7 +229,7 @@
   </section>
 
   <section>
-    <div class="sec-head"><h2>Model scorecard</h2><span class="hint">Ranked by win rate</span></div>
+    <div class="sec-head"><h2>Model scorecard</h2><span class="hint" id="sortHint">Sorted by win rate · click a column title to sort</span></div>
     <div class="filterbar" data-f="score"></div>
     <div class="card table-wrap"><table id="scorecard"></table></div>
   </section>
@@ -255,6 +260,20 @@ const TK_DASH = { SPY: [], QQQ: [6, 4] };
 const dashStyle = d => !d.length ? "solid" : d[0] > 3 ? "dashed" : "dotted";
 let raw = { trades: [], days: [] }, charts = {}, selected = null;
 const openGroups = new Set();
+// Scorecard sorting: click a column title to sort by it, click again to flip the order
+const SORT_COLS = {
+  group: { label: "Group", get: r => MODES.indexOf(r.mode) * 10 + TICKERS.indexOf(r.tk), dir: 1 },
+  model: { label: "Model", get: r => MODEL_KEYS.indexOf(r.m), dir: 1 },
+  n: { label: "Trades", get: r => r.n, dir: -1 },
+  hold: { label: "Avg hold", get: r => r.hold, dir: 1 },
+  wr: { label: "Win rate", get: r => r.n ? r.wr : null, dir: -1 },
+  avgW: { label: "Avg win", get: r => r.avgW, dir: -1 },
+  avgL: { label: "Avg loss", get: r => r.avgL, dir: -1 },
+  p: { label: "Total P&L", get: r => r.n ? r.p : null, dir: -1 },
+  bigW: { label: "Biggest win", get: r => r.bigW, dir: -1 },
+  bigL: { label: "Biggest loss", get: r => r.bigL, dir: -1 },
+};
+let sortKey = "wr", sortDir = -1;
 
 const usd = v => (v >= 0 ? "+$" : "−$") + Math.abs(v).toFixed(2);
 const pct = v => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(1) + "%";
@@ -545,11 +564,20 @@ function render() {
       avgW: w.length ? mean(w.map(t => t.pnl_usd)) : null, avgL: l.length ? mean(l.map(t => t.pnl_usd)) : null,
       bigW: w.length ? Math.max(...w.map(t => t.pnl_usd)) : null, bigL: l.length ? Math.min(...l.map(t => t.pnl_usd)) : null, hold: ts.length ? mean(ts.map(held)) : null });
   })));
-  rowsSc.sort((a, b) => b.wr - a.wr || b.p - a.p);
+  const col = SORT_COLS[sortKey];
+  rowsSc.sort((a, b) => {
+    const x = col.get(a), y = col.get(b);
+    if (x == null && y == null) return (b.n ? b.p : -1e9) - (a.n ? a.p : -1e9);
+    if (x == null) return 1;            // models with no data always sink to the bottom
+    if (y == null) return -1;
+    return (x - y) * sortDir || (b.p - a.p);
+  });
   const FS = FILTERS.score, rowsShown = rowsSc.filter(r => passes(FS, r.mode, r.tk, r.m));
+  document.getElementById("sortHint").textContent = `Sorted by ${col.label.toLowerCase()} ${sortDir === col.dir ? "" : "(reversed) "}· click a column title to sort`;
+  const th = (key, extra = "") => `<th class="sortable ${extra} ${sortKey === key ? "sorted" : ""}" data-sort="${key}" aria-sort="${sortKey === key ? (sortDir > 0 ? "ascending" : "descending") : "none"}">${SORT_COLS[key].label.replace("&", "&amp;")}<span class="arr">${sortKey === key ? (sortDir > 0 ? "▲" : "▼") : "↕"}</span></th>`;
   const cellUsd = (v, c) => v == null ? `<td class="num">–</td>` : `<td class="num ${c}">${usd(v)}</td>`;
   document.getElementById("scorecard").innerHTML =
-    `<tr><th>#</th><th>Group</th><th>Model</th><th class="num">Trades</th><th class="num">Avg hold</th><th class="num">Win rate</th><th class="num">Avg win</th><th class="num">Avg loss</th><th class="num">Total P&amp;L</th><th class="num">Biggest win</th><th class="num">Biggest loss</th><th>Exit rule</th></tr>` +
+    `<tr><th>#</th>${th("group")}${th("model")}${th("n", "num")}${th("hold", "num")}${th("wr", "num")}${th("avgW", "num")}${th("avgL", "num")}${th("p", "num")}${th("bigW", "num")}${th("bigL", "num")}<th>Exit rule</th></tr>` +
     rowsShown.map((r, i) => `<tr><td>${r.n ? i + 1 : "–"}</td><td><b>${r.tk}</b> <span class="mode ${r.mode}">${MODE_NAME[r.mode]}</span></td><td>${r.m}</td><td class="num">${r.n}</td><td class="num">${dur(r.hold)}</td>
       <td class="num">${r.n ? Math.round(r.wr * 100) + "%" : "–"}<span class="bar"><span style="width:${r.n ? Math.round(r.wr * 100) : 0}%"></span></span></td>
       ${cellUsd(r.avgW, "pos")}${cellUsd(r.avgL, "neg")}
@@ -566,6 +594,12 @@ function render() {
     : `<tr><td class="empty">${trades.length ? "No trades match these filters." : "No trades yet. They'll show up here after the first morning."}</td></tr>`;
 }
 
+document.getElementById("scorecard").addEventListener("click", e => {
+  const h = e.target.closest("th[data-sort]"); if (!h) return;
+  const key = h.dataset.sort;
+  if (key === sortKey) sortDir = -sortDir; else { sortKey = key; sortDir = SORT_COLS[key].dir; }
+  render();
+});
 document.getElementById("toggleAll").addEventListener("click", () => {
   if (openGroups.size === MODES.length) openGroups.clear(); else MODES.forEach(m => openGroups.add(m));
   render();
