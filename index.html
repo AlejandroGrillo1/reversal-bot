@@ -112,7 +112,8 @@
   .mode { font-size: 11px; border-radius: 4px; padding: 1px 6px; background: var(--sand); color: var(--ink-2); }
   .mode.always { background: #EFECE7; color: #6E665B; }
   .mode.staggered { background: #F3E7D6; color: #8A6439; }
-  .mode.retrace { background: #E6EFE7; color: #3E6A4C; }
+  .mode.retrace35 { background: #E6EFE7; color: #3E6A4C; }
+  .mode.retrace25 { background: #E4EEF0; color: #3D6670; }
   @media (max-width: 760px) {
     .charts { grid-template-columns: 1fr; }
     .board { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); }
@@ -205,7 +206,7 @@
     <div class="filterbar" data-f="perf"></div>
     <div class="charts">
       <div class="card chart-card full">
-        <h3>Group averages</h3><p>Average of the three models in each group. Signal vs always: does the setup add value? Signal vs retrace: which entry is better? Signal vs staggered: does holding longer help?</p>
+        <h3>Group averages</h3><p>Average of the three models in each group. Signal vs always: does the setup add value? Signal vs the retrace groups: which entry is better, and how deep a pullback? Signal vs staggered: does holding longer help?</p>
         <div class="chart-box"><canvas id="chartAvg" aria-label="Average cumulative P&amp;L by group"></canvas></div>
         <div class="legend" id="legendAvg"></div>
       </div>
@@ -214,15 +215,20 @@
         <div class="chart-box"><canvas id="chartSignal" aria-label="Signal models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendSignal"></div>
       </div>
-      <div class="card chart-card" id="cardRetrace">
-        <div class="card-top"><h3>Retrace models</h3><div class="life" id="lifeRetrace"></div></div><p>Trend and RSI, then a 33% pullback from the morning high or low; green exits at 5 min</p>
-        <div class="chart-box"><canvas id="chartRetrace" aria-label="Retrace models cumulative P&amp;L"></canvas></div>
-        <div class="legend" id="legendRetrace"></div>
-      </div>
       <div class="card chart-card" id="cardStaggered">
         <div class="card-top"><h3>Staggered models</h3><div class="life" id="lifeStaggered"></div></div><p>Same signal as Signal, but green exits at 5 / 12 / 20 min</p>
         <div class="chart-box"><canvas id="chartStaggered" aria-label="Staggered models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendStaggered"></div>
+      </div>
+      <div class="card chart-card" id="cardRetrace25">
+        <div class="card-top"><h3>Retrace 25% models</h3><div class="life" id="lifeRetrace25"></div></div><p>Trend and RSI, then a 25% pullback from the morning high or low; green exits at 5 min</p>
+        <div class="chart-box"><canvas id="chartRetrace25" aria-label="Retrace 25% models cumulative P&amp;L"></canvas></div>
+        <div class="legend" id="legendRetrace25"></div>
+      </div>
+      <div class="card chart-card" id="cardRetrace35">
+        <div class="card-top"><h3>Retrace 35% models</h3><div class="life" id="lifeRetrace35"></div></div><p>Trend and RSI, then a 35% pullback from the morning high or low; green exits at 5 min</p>
+        <div class="chart-box"><canvas id="chartRetrace35" aria-label="Retrace 35% models cumulative P&amp;L"></canvas></div>
+        <div class="legend" id="legendRetrace35"></div>
       </div>
       <div class="card chart-card" id="cardAlways">
         <div class="card-top"><h3>Always-trade models</h3><div class="life" id="lifeAlways"></div></div><p>Fade the morning move at 7:28 PT every day, no filters</p>
@@ -252,11 +258,11 @@ const DEMO = new URLSearchParams(location.search).has("demo");
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
 const MODEL_KEYS = Object.keys(MODELS);
-const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "retrace", "staggered", "always"];
-const MODE_NAME = { signal: "Signal", retrace: "Retrace", staggered: "Staggered", always: "Always" };
-const MODE_DESC = { signal: "VWAP cross · 5m hold", retrace: "33% pullback · 5m hold", staggered: "VWAP cross · 5 / 12 / 20m hold", always: "Every day at 7:28 · 5m hold" };
-const MODE_COLOR = { signal: "#2B2722", retrace: "#4C7A5B", staggered: "#B8875A", always: "#A39A8C" };
-const HOLD = { signal: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace: { Conservative: 5, Moderate: 5, Aggressive: 5 }, staggered: { Conservative: 5, Moderate: 12, Aggressive: 20 }, always: { Conservative: 5, Moderate: 5, Aggressive: 5 } };
+const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "staggered", "retrace25", "retrace35", "always"];
+const MODE_NAME = { signal: "Signal", retrace35: "Retrace 35%", retrace25: "Retrace 25%", staggered: "Staggered", always: "Always" };
+const MODE_DESC = { signal: "VWAP cross · 5m hold", retrace35: "35% pullback · 5m hold", retrace25: "25% pullback · 5m hold", staggered: "VWAP cross · 5 / 12 / 20m hold", always: "Every day at 7:28 · 5m hold" };
+const MODE_COLOR = { signal: "#2B2722", retrace35: "#4C7A5B", retrace25: "#5E8F99", staggered: "#B8875A", always: "#A39A8C" };
+const HOLD = { signal: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace35: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace25: { Conservative: 5, Moderate: 5, Aggressive: 5 }, staggered: { Conservative: 5, Moderate: 12, Aggressive: 20 }, always: { Conservative: 5, Moderate: 5, Aggressive: 5 } };
 const holdLabel = mode => mode === "staggered" ? "5 / 12 / 20m hold" : "5m hold";
 const TK_COLOR = { SPY: "#2B2722", QQQ: "#B8875A" };
 const MODEL_DASH = { Conservative: [], Moderate: [6, 4], Aggressive: [2, 3] };
@@ -369,7 +375,7 @@ function fakeData() {
   const dayRec = (date, tk, mode, direction, traded, note) => days.push({ date, ticker: tk, mode, direction, traded, note });
   dates.forEach(date => TICKERS.forEach(tk => {
     const morning = rnd() < .5 ? "up" : "down", r = rnd();
-    if (r < .2) ["signal", "retrace", "staggered"].forEach(mode => dayRec(date, tk, mode, "flat", false, "Flat morning, no trade"));
+    if (r < .2) ["signal", "retrace35", "retrace25", "staggered"].forEach(mode => dayRec(date, tk, mode, "flat", false, "Flat morning, no trade"));
     else {
       if (r < .45) ["signal", "staggered"].forEach(mode => dayRec(date, tk, mode, morning, false, `Morning ${morning}, no VWAP cross with RSI confirmation`));
       else {
@@ -377,8 +383,10 @@ function fakeData() {
         makeTrades(date, tk, "staggered", morning, m0, 1);
         ["signal", "staggered"].forEach(mode => dayRec(date, tk, mode, morning, true, `Morning ${morning}, bought ${o}s, all models closed`));
       }
-      if (rnd() < .78) { const o = makeTrades(date, tk, "retrace", morning, Math.floor(rnd() * 15), .95); dayRec(date, tk, "retrace", morning, true, `Morning ${morning}, bought ${o}s after a 33% pullback, all models closed`); }
-      else dayRec(date, tk, "retrace", morning, false, `Morning ${morning}, no 33% retracement with RSI confirmation`);
+      [["retrace35", 35, .75, .95], ["retrace25", 25, .88, .85]].forEach(([mode, pc, prob, edge]) => {
+        if (rnd() < prob) { const o = makeTrades(date, tk, mode, morning, Math.floor(rnd() * 15), edge); dayRec(date, tk, mode, morning, true, `Morning ${morning}, bought ${o}s after a ${pc}% pullback, all models closed`); }
+        else dayRec(date, tk, mode, morning, false, `Morning ${morning}, no ${pc}% retracement with RSI confirmation`);
+      });
     }
     const o2 = makeTrades(date, tk, "always", morning, 6, .75);
     dayRec(date, tk, "always", morning, true, `Morning ${morning}, bought ${o2}s at 7:28, all models closed`);
@@ -597,8 +605,8 @@ function render() {
   const rows = [...logTrades].sort((a, b) => order(b).localeCompare(order(a))).slice(0, 80);
   document.getElementById("logCount").textContent = logTrades.length > 80 ? `Latest 80 of ${logTrades.length}` : `${logTrades.length} trade${logTrades.length === 1 ? "" : "s"}`;
   document.getElementById("log").innerHTML = rows.length
-    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">Option return</th><th class="num">P&amp;L</th><th>Exit</th><th>Time (ET)</th><th class="num">Held</th></tr>` +
-      rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}${t.fallback ? '<span class="tag est">ETF est.</span>' : ""}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.reason}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td><td class="num">${dur(held(t))}</td></tr>`).join("")
+    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">Option return</th><th class="num">P&amp;L</th><th>Time (ET)</th><th class="num">Held</th><th class="num">ETF at buy</th><th class="num">ETF at sell</th><th>Exit reason</th></tr>` +
+      rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}${t.fallback ? '<span class="tag est">ETF est.</span>' : ""}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td><td class="num">${dur(held(t))}</td><td class="num">${t.etf_entry != null ? "$" + Number(t.etf_entry).toFixed(2) : "–"}</td><td class="num">${t.etf_exit != null ? "$" + Number(t.etf_exit).toFixed(2) : "–"}</td><td>${t.reason}</td></tr>`).join("")
     : `<tr><td class="empty">${trades.length ? "No trades match these filters." : "No trades yet. They'll show up here after the first morning."}</td></tr>`;
 }
 
