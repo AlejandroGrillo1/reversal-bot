@@ -25,8 +25,12 @@ Thesis: the morning move tends to reverse around 10:30 ET (7:30 PT).
   5. No time stop: positions ride until their target or stop hits. The only
      forced exit is the end-of-day close (same-day options expire at 4pm ET).
 
-Each ticker runs three groups of the three models:
+Each ticker runs four groups of the three models:
   signal:    the setup above, every model sells green after 5 min
+  retrace:   same trend + RSI checks, but instead of the VWAP cross it enters
+             once price has retraced RETRACE_PCT (33%) of the morning move
+             back from the day's high (up mornings) or low (down mornings);
+             5-min hold
   staggered: same signal entry, but hold times of 5 / 12 / 20 min
              (Conservative / Moderate / Aggressive)
   always:    skips the trend, VWAP and RSI checks and trades every day at
@@ -78,6 +82,7 @@ MODELS = {
 CONTRACTS_PER_MODEL = 1
 HOLD_MINUTES = {               # minutes before a green trade gets sold, per group and model
     "signal": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
+    "retrace": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
     "staggered": {"Conservative": 5, "Moderate": 12, "Aggressive": 20},
     "always": {"Conservative": 5, "Moderate": 5, "Aggressive": 5},
 }
@@ -90,7 +95,9 @@ ALWAYS_ENTRY = dtime(10, 28)   # 7:28 PT: when the always-trade models enter
 EOD_CLOSE = dtime(15, 30)      # end-of-day exit, 12:30 PT (options expire at 4pm ET;
                                # GitHub also caps a run at 6 hours)
 USE_RSI_FILTER = True          # signal models also require RSI >70 (up) / <30 (down) in last 30 min
-MODES = ["signal", "staggered", "always"]  # signal/staggered need trend + VWAP cross + RSI; always trades daily
+MODES = ["signal", "retrace", "staggered", "always"]
+# signal/staggered: trend + VWAP cross + RSI. retrace: trend + 33% pullback + RSI. always: trades daily
+RETRACE_PCT = 0.33             # retrace group: enter after price gives back 33% of the open-to-extreme move
 POLL_SECONDS = 10
 FALLBACK_TO_ETF = True         # if options fail, track the trade on the ETF price instead of skipping
 EST_LEVERAGE = 170             # fallback estimate: a ~$1 option moves ~170x the ETF's % move
@@ -375,13 +382,25 @@ class TickerBot:
             self.phase = "watch"
 
         elif self.phase == "watch":
+            trigger = f"{RETRACE_PCT:.0%} retracement" if self.mode == "retrace" else "VWAP cross"
             if now.time() > WINDOW_END:
-                return self.finish(f"Morning {self.direction}, no VWAP cross with RSI confirmation in window")
+                return self.finish(f"Morning {self.direction}, no {trigger} with RSI confirmation in window")
             bars = get_bars(self.symbol)
             if len(bars) < 15:
                 return
-            price, v = bars["close"].iloc[-1], vwap(bars).iloc[-1]
-            crossed = price < v if self.direction == "up" else price > v
+            price = bars["close"].iloc[-1]
+            if self.mode == "retrace":
+                # Measure the move from the open to the day's extreme, then wait for a 33% give-back.
+                day_open = bars["open"].iloc[0]
+                if self.direction == "up":
+                    high = bars["high"].max()
+                    crossed = high > day_open and price <= high - RETRACE_PCT * (high - day_open)
+                else:
+                    low = bars["low"].min()
+                    crossed = low < day_open and price >= low + RETRACE_PCT * (day_open - low)
+            else:
+                v = vwap(bars).iloc[-1]
+                crossed = price < v if self.direction == "up" else price > v
             if USE_RSI_FILTER:
                 recent = rsi(bars["close"]).iloc[-30:]
                 crossed = crossed and (recent.max() > 70 if self.direction == "up" else recent.min() < 30)
