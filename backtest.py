@@ -22,6 +22,12 @@ same exit times and reasons) re-priced as 3x leveraged ETFs instead of options:
   SPY -> UPRO (bullish) / SPXU (bearish),  QQQ -> TQQQ / SQQQ
 P&L = $100 x (3 x the ETF's move in your favor) minus an assumed spread. No time
 decay, tiny spreads, much smaller payoffs. Shown at index.html?data=levered.
+
+And data/backtest_levered_nohold.json: the 3x ETF version again, but with the
+5-minute hold exits (sell-if-green at 5 min and the +3% recovery) REMOVED for
+Signal, Retrace 25%, Retrace 35%, Always and Long only, so trades only end at their
+target, stop, option stop or the end-of-day close. Staggered keeps its
+5 / 12 / 20 min hold rules. Shown at index.html?data=nohold.
 Run it from GitHub: Actions > Backtest > Run workflow.
 """
 import json
@@ -39,6 +45,8 @@ ET = ZoneInfo("America/New_York")
 OUT = Path("data/backtest.json")
 HALF_SPREAD = 0.01            # assumed: buy 1 cent above the estimate, sell 1 cent below
 OUT_LEV = Path("data/backtest_levered.json")
+OUT_NOHOLD = Path("data/backtest_levered_nohold.json")
+KEEP_HOLD_RULES = {"staggered"}   # in the no-hold run, only these groups keep their hold exits
 LEV = 3                       # leveraged ETF multiple
 LEV_NOTIONAL = 100            # dollars per levered-ETF trade (same $100 as the option trades)
 LEV_HALF_SPREAD = 0.0001      # assumed: 0.01% each way on very liquid 3x ETFs
@@ -111,7 +119,7 @@ def est_mid(move, minutes):
 
 def find_entry(bars, day, mode):
     """Apply the live bot's entry rules. Returns (direction, entry_time, etf_price, note)."""
-    start = bot.ALWAYS_ENTRY if mode == "always" else bot.WINDOW_START
+    start = bot.ALWAYS_ENTRY if mode in bot.ALWAYS_STYLE else bot.WINDOW_START
     t0 = at(day, start)
     done = bars[bars.index < t0]
     if len(done) < 5:
@@ -119,8 +127,10 @@ def find_entry(bars, day, mode):
     day_open = done["open"].iloc[0]
     move = done["close"].iloc[-1] / day_open - 1
 
-    if mode == "always":
+    if mode in bot.ALWAYS_STYLE:
         direction = "up" if move >= 0 else "down"
+        if mode == "longonly" and direction == "up":
+            return "up", None, None, f"Morning up ({move:+.2%}), long-only skips bearish trades"
         kind = "PUT" if direction == "up" else "CALL"
         return direction, t0, done["close"].iloc[-1], f"Morning {direction}, bought {kind}s at 7:28"
     if move > bot.TREND_THRESHOLD:
@@ -157,7 +167,7 @@ def find_entry(bars, day, mode):
     return direction, None, None, f"Morning {direction}, no {trigger} with RSI confirmation in window"
 
 
-def run_models(bars, day, mode, direction, t_entry, etf_entry, ticker):
+def run_models(bars, day, mode, direction, t_entry, etf_entry, ticker, no_hold=False):
     """Walk minute by minute after entry and apply every exit rule to each model."""
     kind = "PUT" if direction == "up" else "CALL"
     sign = -1 if kind == "PUT" else 1
@@ -166,7 +176,7 @@ def run_models(bars, day, mode, direction, t_entry, etf_entry, ticker):
     entry_fill = 1.0 + HALF_SPREAD
     trades = []
     for model, (target, stop, opt_stop) in bot.MODELS.items():
-        hold = bot.HOLD_MINUTES[mode][model]
+        hold = None if (no_hold and mode not in KEEP_HOLD_RULES) else bot.HOLD_MINUTES[mode][model]
         red, exit_ = None, None
         for ts, row in after.iterrows():
             mins = (ts - t_entry).total_seconds() / 60 + 1       # minutes held at the end of this bar
@@ -189,7 +199,7 @@ def run_models(bars, day, mode, direction, t_entry, etf_entry, ticker):
             if fav >= target:
                 exit_ = ("target", target, est_mid(target, mins), bar_end)
                 break
-            if mins >= hold:
+            if hold is not None and mins >= hold:
                 bid = est_mid(close_move, mins) - HALF_SPREAD
                 if red is None:
                     red = bid <= entry_fill
@@ -221,7 +231,7 @@ def run_models(bars, day, mode, direction, t_entry, etf_entry, ticker):
     return trades
 
 
-def simulate(day_bars):
+def simulate(day_bars, no_hold=False):
     trades, days = [], []
     for (ticker, day) in sorted(day_bars, key=lambda k: (k[1], bot.TICKERS.index(k[0]))):
         bars = day_bars[(ticker, day)]
@@ -230,7 +240,7 @@ def simulate(day_bars):
             rec = {"date": str(day), "ticker": ticker, "mode": mode, "direction": direction,
                    "traded": t_entry is not None, "note": note, "test": False}
             if t_entry is not None:
-                trades += run_models(bars, day, mode, direction, t_entry, float(price), ticker)
+                trades += run_models(bars, day, mode, direction, t_entry, float(price), ticker, no_hold)
                 rec["note"] += ", all models closed"
             days.append(rec)
     return trades, days
@@ -280,6 +290,19 @@ def main():
         "trades": lev, "days": days, "errors": [],
     }, indent=1))
     print(f"3x ETF version: total {sum(t['pnl_usd'] for t in lev):,.2f} on {len(lev):,} trades")
+
+    nh_trades, nh_days = simulate(day_bars, no_hold=True)
+    nh = to_levered(nh_trades)
+    OUT_NOHOLD.write_text(json.dumps({
+        "meta": {
+            "generated": datetime.now(ET).strftime("%Y-%m-%d %H:%M ET"),
+            "start": START, "end": END, "trading_days": n_days, "feed": feed,
+            "note": f"{LEV}x leveraged ETFs, same entries, but the 5-minute hold exits are removed "
+                    "(Staggered keeps its 5 / 12 / 20 min rules); trades end only at target, stop, option stop or 12:30 PT",
+        },
+        "trades": nh, "days": nh_days, "errors": [],
+    }, indent=1))
+    print(f"3x ETF, no 5-min exits: total {sum(t['pnl_usd'] for t in nh):,.2f} on {len(nh):,} trades")
 
     # Quick summary in the Actions log
     t = pd.DataFrame(trades)
