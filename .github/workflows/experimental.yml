@@ -26,7 +26,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,10 +43,10 @@ jobs:
             python experimental.py 2026-01-01 "" backtest_experimental.json
           fi
           if [ "$WHICH" = "last 5 years" ] || [ "$WHICH" = "all three" ]; then
-            python experimental.py 2021-10-01 "" backtest_experimental_5y.json
+            python experimental.py 2021-10-01 "" backtest_experimental_5y.json daily
           fi
           if [ "$WHICH" = "2022-23 round trip" ] || [ "$WHICH" = "all three" ]; then
-            python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json
+            python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json daily
           fi
       - name: Save results
         run: |
