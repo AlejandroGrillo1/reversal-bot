@@ -197,7 +197,7 @@
     <div class="card table-wrap"><table id="log"></table></div>
   </section>
 
-  <footer id="footer">Signal entries 7:22–7:40 PT · Always-trade entries 7:28 PT · Green trades sell at the hold mark (+3% if red) · Paper money only</footer>
+  <footer id="footer">Signal entries 7:22–7:50 PT · Always-trade entries 7:28 PT · Green trades sell at the hold mark (+3% if red) · Paper money only</footer>
 </main>
 
 <script>
@@ -360,7 +360,7 @@ function render() {
   // Hero
   if (!latest) {
     document.getElementById("heroNum").textContent = "$0";
-    document.getElementById("heroSub").textContent = "No sessions yet. The bot looks for entries each weekday from 7:22 to 7:40 PT.";
+    document.getElementById("heroSub").textContent = "No sessions yet. The bot looks for entries each weekday from 7:22 to 7:50 PT.";
   } else {
     const t = trades.filter(x => x.date === selected), p = sum(t.map(x => x.pnl_usd));
     const num = document.getElementById("heroNum");
