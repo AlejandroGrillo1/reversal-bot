@@ -110,6 +110,7 @@
   .chart-box { position: relative; height: 260px; }
   .charts .full .chart-box { height: 320px; }
   .mode { font-size: 11px; border-radius: 4px; padding: 1px 6px; background: var(--sand); color: var(--ink-2); }
+  .mode.longonly { background: #ECE9F3; color: #5A507A; }
   .mode.always { background: #EFECE7; color: #6E665B; }
   .mode.staggered { background: #F3E7D6; color: #8A6439; }
   .mode.retrace35 { background: #E6EFE7; color: #3E6A4C; }
@@ -178,7 +179,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -213,7 +214,7 @@
     <div class="filterbar" data-f="perf"></div>
     <div class="charts">
       <div class="card chart-card full">
-        <h3>Group averages</h3><p>Average of the three models in each group. Signal vs always: does the setup add value? Signal vs the retrace groups: which entry is better, and how deep a pullback? Signal vs staggered: does holding longer help?</p>
+        <h3>Group averages</h3><p>Average of the three models in each group. Signal vs always: does the setup add value? Signal vs the retrace groups: which entry is better, and how deep a pullback? Signal vs staggered: does holding longer help? Always vs long only: does skipping the bearish trades help?</p>
         <div class="chart-box"><canvas id="chartAvg" aria-label="Average cumulative P&amp;L by group"></canvas></div>
         <div class="legend" id="legendAvg"></div>
       </div>
@@ -242,6 +243,11 @@
         <div class="chart-box"><canvas id="chartAlways" aria-label="Always-trade models cumulative P&amp;L"></canvas></div>
         <div class="legend" id="legendAlways"></div>
       </div>
+      <div class="card chart-card" id="cardLongonly">
+        <div class="card-top"><h3>Long-only models</h3><div class="life" id="lifeLongonly"></div></div><p>Like Always, but bullish trades only: buys calls at 7:28 PT after a down morning, skips up mornings</p>
+        <div class="chart-box"><canvas id="chartLongonly" aria-label="Long-only models cumulative P&amp;L"></canvas></div>
+        <div class="legend" id="legendLongonly"></div>
+      </div>
     </div>
   </section>
 
@@ -257,7 +263,7 @@
     <div class="card table-wrap"><table id="log"></table></div>
   </section>
 
-  <footer id="footer">Signal and retrace entries 7:22–7:50 PT · Always-trade entries 7:28 PT · Green trades sell at the hold mark (+3% if red) · Paper money only</footer>
+  <footer id="footer">Signal and retrace entries 7:22–7:50 PT · Always and long-only entries 7:28 PT · Green trades sell at the hold mark (+3% if red) · Paper money only</footer>
 </main>
 
 <script>
@@ -267,18 +273,22 @@ const SOURCES = {
   live: { link: "srcLive", file: "data/results.json", label: "" },
   backtest: { link: "srcBacktest", file: "data/backtest.json", label: "Backtest · " },
   levered: { link: "srcLevered", file: "data/backtest_levered.json", label: "3× ETF backtest · " },
+  nohold: { link: "srcNohold", file: "data/backtest_levered_nohold.json", label: "3× ETF, no 5-min exit · " },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
 const MODEL_KEYS = Object.keys(MODELS);
-const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "staggered", "retrace25", "retrace35", "always"];
-const MODE_NAME = { signal: "Signal", retrace35: "Retrace 35%", retrace25: "Retrace 25%", staggered: "Staggered", always: "Always" };
-const MODE_DESC = { signal: "VWAP cross · 5m hold", retrace35: "35% pullback · 5m hold", retrace25: "25% pullback · 5m hold", staggered: "VWAP cross · 5 / 12 / 20m hold", always: "Every day at 7:28 · 5m hold" };
-const MODE_COLOR = { signal: "#2B2722", retrace35: "#4C7A5B", retrace25: "#5E8F99", staggered: "#B8875A", always: "#A39A8C" };
-const HOLD = { signal: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace35: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace25: { Conservative: 5, Moderate: 5, Aggressive: 5 }, staggered: { Conservative: 5, Moderate: 12, Aggressive: 20 }, always: { Conservative: 5, Moderate: 5, Aggressive: 5 } };
-const holdLabel = mode => mode === "staggered" ? "5 / 12 / 20m hold" : "5m hold";
+const TICKERS = ["SPY", "QQQ"], MODES = ["signal", "staggered", "retrace25", "retrace35", "always", "longonly"];
+const MODE_NAME = { signal: "Signal", retrace35: "Retrace 35%", retrace25: "Retrace 25%", staggered: "Staggered", always: "Always", longonly: "Long only" };
+const MODE_DESC = { signal: "VWAP cross · 5m hold", retrace35: "35% pullback · 5m hold", retrace25: "25% pullback · 5m hold", staggered: "VWAP cross · 5 / 12 / 20m hold", always: "Every day at 7:28 · 5m hold", longonly: "Calls only, down mornings at 7:28 · 5m hold" };
+const MODE_COLOR = { signal: "#2B2722", retrace35: "#4C7A5B", retrace25: "#5E8F99", staggered: "#B8875A", always: "#A39A8C", longonly: "#7A6F9B" };
+const HOLD = { signal: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace35: { Conservative: 5, Moderate: 5, Aggressive: 5 }, retrace25: { Conservative: 5, Moderate: 5, Aggressive: 5 }, staggered: { Conservative: 5, Moderate: 12, Aggressive: 20 }, always: { Conservative: 5, Moderate: 5, Aggressive: 5 }, longonly: { Conservative: 5, Moderate: 5, Aggressive: 5 } };
+const noHold = mode => SRC === "nohold" && mode !== "staggered";   // no-hold page: only Staggered keeps hold exits
+const holdLabel = mode => mode === "staggered" ? "5 / 12 / 20m hold" : noHold(mode) ? "no hold exit" : "5m hold";
+const modeDesc = mode => noHold(mode) ? MODE_DESC[mode].replace("5m hold", "no hold exit") : MODE_DESC[mode];
+const holdRule = (mode, m) => noHold(mode) ? "no hold exit" : `${HOLD[mode][m]}m hold`;
 const TK_COLOR = { SPY: "#2B2722", QQQ: "#B8875A" };
 const MODEL_DASH = { Conservative: [], Moderate: [6, 4], Aggressive: [2, 3] };
 const TK_DASH = { SPY: [], QQQ: [6, 4] };
@@ -405,6 +415,8 @@ function fakeData() {
     }
     const o2 = makeTrades(date, tk, "always", morning, 6, .75);
     dayRec(date, tk, "always", morning, true, `Morning ${morning}, bought ${o2}s at 7:28, all models closed`);
+    if (morning === "down") { makeTrades(date, tk, "longonly", morning, 6, .8); dayRec(date, tk, "longonly", morning, true, "Morning down, bought CALLs at 7:28, all models closed"); }
+    else dayRec(date, tk, "longonly", morning, false, "Morning up, long-only skips bearish trades");
   }));
   const fbDate = dates[dates.length - 6];
   trades.forEach(t => { if (t.date === fbDate && t.ticker === "QQQ" && t.mode === "always") { t.fallback = true; t.contract = "QQQ (ETF est.)"; t.entry = 1; t.exit = +(1 + t.pnl_pct).toFixed(2); } });
@@ -422,6 +434,7 @@ async function load() {
     document.getElementById("srcLive").href = "?demo";
     document.getElementById("srcBacktest").href = "?demo&data=backtest";
     document.getElementById("srcLevered").href = "?demo&data=levered";
+    document.getElementById("srcNohold").href = "?demo&data=nohold";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -429,10 +442,10 @@ async function load() {
   raw = { trades: [], days: [], errors: [] }; selected = null;
   if (DEMO) {
     raw = fakeData();
-    if (SRC === "levered") raw.trades = raw.trades.map(t => { const fav = t.option === "PUT" ? -t.etf_move : t.etf_move, r = 3 * fav - 0.0002;
+    if (SRC === "levered" || SRC === "nohold") raw.trades = raw.trades.map(t => { const fav = t.option === "PUT" ? -t.etf_move : t.etf_move, r = 3 * fav - 0.0002;
       return { ...t, contract: (t.ticker === "SPY" ? (t.option === "PUT" ? "SPXU" : "UPRO") : (t.option === "PUT" ? "SQQQ" : "TQQQ")) + " (3x est.)",
         side: t.option === "PUT" ? "inverse 3×" : "long 3×", entry: 100, exit: +(100 * (1 + r)).toFixed(2), pnl_pct: r, pnl_usd: +(100 * r).toFixed(2), levered: true }; });
-    if (SRC !== "live") { banner.classList.remove("hidden"); banner.innerHTML = `<b>${SRC === "levered" ? "3× ETF backtest" : "Backtest"} (demo)</b> · Sample data. On your real site this shows the results of Actions → Backtest.`; }
+    if (SRC !== "live") { banner.classList.remove("hidden"); banner.innerHTML = `<b>${SRC === "backtest" ? "Backtest" : SRC === "nohold" ? "3× ETF, no 5-min exit" : "3× ETF backtest"} (demo)</b> · Sample data. On your real site this shows the results of Actions → Backtest.`; }
   }
   else {
     const file = SOURCES[SRC].file;
@@ -452,8 +465,9 @@ async function load() {
   if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
-    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
-      (SRC === "levered" ? `Same entries and exits as the options backtest, only the instrument changes.` : `Treat dollars as estimates; use it to compare models.`);
+    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : SRC === "nohold" ? "3× ETF backtest, no 5-min exit" : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
+      (SRC === "levered" ? `Same entries and exits as the options backtest, only the instrument changes.` :
+       SRC === "nohold" ? `Compare with the 3× ETFs page: same entries, only the 5-minute hold exits are removed.` : `Treat dollars as estimates; use it to compare models.`);
     document.getElementById("footer").textContent = "Backtest results: simulated, not real trades";
   }
   if (DEMO) document.getElementById("footer").textContent = "Demo mode: sample data, not real results";
@@ -562,7 +576,7 @@ function render() {
     return `<div class="grp ${openGroups.has(mode) ? "open" : ""}" data-mode="${mode}">
       <button class="grp-head" aria-expanded="${openGroups.has(mode)}">
         <span class="chev">▸</span>
-        <div class="grp-name"><b><i class="sw" style="background:${MODE_COLOR[mode]}"></i>${MODE_NAME[mode]}</b><small>${MODE_DESC[mode]} · ${n ? `${n} of ${slots} traded` : "no trades"}</small></div>
+        <div class="grp-name"><b><i class="sw" style="background:${MODE_COLOR[mode]}"></i>${MODE_NAME[mode]}</b><small>${modeDesc(mode)} · ${n ? `${n} of ${slots} traded` : "no trades"}</small></div>
         ${kp("Avg P&L / trade", usd(avgP), cls(avgP), "k1")}
         ${kp("Avg return", pct(avgR), cls(avgR), "k2")}
         ${kp("Avg ETF move your way", moves.length ? pct2(avgM) : "–", moves.length ? cls(avgM) : "", "k3")}
@@ -646,7 +660,7 @@ function render() {
     rowsShown.map((r, i) => `<tr><td>${r.n ? i + 1 : "–"}</td><td><b>${r.tk}</b> <span class="mode ${r.mode}">${MODE_NAME[r.mode]}</span></td><td>${r.m}</td><td class="num">${r.n}</td><td class="num">${dur(r.hold)}</td>
       <td class="num">${r.n ? Math.round(r.wr * 100) + "%" : "–"}<span class="bar"><span style="width:${r.n ? Math.round(r.wr * 100) : 0}%"></span></span></td>
       ${cellUsd(r.avgW, "pos")}${cellUsd(r.avgL, "neg")}
-      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}<td class="hint">${r.d} · ${HOLD[r.mode][r.m]}m hold</td></tr>`).join("");
+      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}<td class="hint">${r.d} · ${holdRule(r.mode, r.m)}</td></tr>`).join("");
 
   // Log
   const order = x => x.date + x.entry_time + x.ticker + modeOf(x) + x.model;
@@ -654,7 +668,7 @@ function render() {
   const rows = [...logTrades].sort((a, b) => order(b).localeCompare(order(a))).slice(0, 80);
   document.getElementById("logCount").textContent = logTrades.length > 80 ? `Latest 80 of ${logTrades.length}` : `${logTrades.length} trade${logTrades.length === 1 ? "" : "s"}`;
   document.getElementById("log").innerHTML = rows.length
-    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">${SRC === "levered" ? "Return" : "Option return"}</th><th class="num">P&amp;L</th><th>Time (ET)</th><th class="num">Held</th><th class="num">ETF at buy</th><th class="num">ETF at sell</th><th>Exit reason</th></tr>` +
+    ? `<tr><th>Date</th><th>Ticker</th><th>Group</th><th>Model</th><th>Contract</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">ETF move</th><th class="num">${SRC === "levered" || SRC === "nohold" ? "Return" : "Option return"}</th><th class="num">P&amp;L</th><th>Time (ET)</th><th class="num">Held</th><th class="num">ETF at buy</th><th class="num">ETF at sell</th><th>Exit reason</th></tr>` +
       rows.map(t => `<tr><td>${short(t.date)}${t.test ? '<span class="tag">test</span>' : ""}</td><td>${t.ticker}</td><td><span class="mode ${modeOf(t)}">${MODE_NAME[modeOf(t)]}</span></td><td>${t.model}</td><td>${t.contract}${t.fallback ? '<span class="tag est">ETF est.</span>' : ""}</td><td class="num">${t.entry.toFixed(2)}</td><td class="num">${t.exit.toFixed(2)}</td><td class="num">${t.etf_move != null ? pct2(t.etf_move) : "–"}</td><td class="num ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td class="num ${cls(t.pnl_usd)}">${usd(t.pnl_usd)}</td><td>${t.entry_time.slice(0, 5)}–${t.exit_time.slice(0, 5)}</td><td class="num">${dur(held(t))}</td><td class="num">${t.etf_entry != null ? "$" + Number(t.etf_entry).toFixed(2) : "–"}</td><td class="num">${t.etf_exit != null ? "$" + Number(t.etf_exit).toFixed(2) : "–"}</td><td>${t.reason}</td></tr>`).join("")
     : `<tr><td class="empty">${trades.length ? "No trades match these filters." : "No trades yet. They'll show up here after the first morning."}</td></tr>`;
 }
