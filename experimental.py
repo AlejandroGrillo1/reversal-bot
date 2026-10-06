@@ -28,12 +28,15 @@ Pricing (same method as the other 3x pages)
   Every buy and sell pays SLIPPAGE per share.
 
 Runs (each one feeds its own dashboard tab):
-    python experimental.py 2026-01-01 "" backtest_experimental.json        # this year (daily)
-    python experimental.py 2021-10-01 "" backtest_experimental_5y.json     # last 5 years
-    python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json
+    python experimental.py 2026-01-01 "" backtest_experimental.json              # this year, all groups
+    python experimental.py 2021-10-01 "" backtest_experimental_5y.json daily     # last 5 years, ladders
+    python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json daily
           # the 2022-23 round trip: SPY/QQQ fell about 25-35%, then finished
           # roughly where they started
-Arguments: START  END (blank = latest close)  OUTPUT FILE NAME in data/
+Arguments: START  END (blank = latest close)  OUTPUT FILE NAME in data/  [daily]
+"daily" uses one open and close per day instead of minute data. That's all the
+ladders need (they act on the close), so long runs take seconds. The day-trading
+groups need minute data, so they're left out of daily runs.
 """
 
 import json
@@ -295,6 +298,18 @@ class AlpacaData:
         data = self._bars(symbols, dt.datetime.combine(start, dt.time(), ET), dt.datetime.combine(end, dt.time(23, 59), ET), TimeFrame.Day)
         return {s: sorted((r.timestamp.astimezone(ET).date().isoformat(), float(r.close)) for r in rows) for s, rows in data.items()}
 
+    def daily_bars(self, symbols, start, end):
+        """{date: {symbol: {'09:30': open, '15:55': close}}} in the same shape as minute bars."""
+        from alpaca.data.timeframe import TimeFrame
+        data = self._bars(symbols, dt.datetime.combine(start, dt.time(), ET), dt.datetime.combine(end, dt.time(23, 59), ET), TimeFrame.Day)
+        out = {}
+        for sym, rows in data.items():
+            for r in rows:
+                d = r.timestamp.astimezone(ET).date().isoformat()
+                o, c = float(r.open), float(r.close)
+                out.setdefault(d, {})[sym] = {"09:30": (o, o, o, o), EOD_TIME: (c, c, c, c)}
+        return out
+
     def minute_bars(self, symbols, days):
         from alpaca.data.timeframe import TimeFrame
         out = {d: {} for d in days}
@@ -312,8 +327,9 @@ class AlpacaData:
         return out
 
 
-def run(data, start, end=None):
-    """Replays START..END one month at a time (keeps memory low on long runs)."""
+def run(data, start, end=None, daily=False):
+    """Replays START..END one month at a time (keeps memory low on long runs).
+    daily=True: ladders only, from one open and close per day."""
     now = dt.datetime.now(ET)
     latest = now.date() if now.time() >= dt.time(16, 5) else now.date() - dt.timedelta(days=1)
     end = min(end or latest, latest)
@@ -322,9 +338,12 @@ def run(data, start, end=None):
     print(f"{len(days)} trading days: {days[0]} .. {days[-1]}")
     eng = Engine()
     first_px, last_px, last_bars = {}, {}, None
+    if daily:
+        symbols = TICKERS + [p["bull"] for p in PAIRS.values()]
+        all_daily = data.daily_bars(symbols, start, end)
     for mo in sorted({d[:7] for d in days}):
         md = [d for d in days if d.startswith(mo)]
-        bars = data.minute_bars(ALL_SYMBOLS, md)
+        bars = {d: all_daily.get(d, {}) for d in md} if daily else data.minute_bars(ALL_SYMBOLS, md)
         for d in md:
             if not bars[d].get("SPY"):
                 print(f"  {d}: no data, skipped"); continue
@@ -333,7 +352,8 @@ def run(data, start, end=None):
                 prior = [c for dd, c in closes.get(tk, []) if dd < d]
                 high52[tk] = max(prior[-LOOKBACK:]) if len(prior) >= 20 else None
                 prev_close[tk] = prior[-1] if prior else None
-            eng.intraday(d, bars[d], prev_close)
+            if not daily:
+                eng.intraday(d, bars[d], prev_close)
             eng.dips(d, bars[d], high52)
             for tk, pair in PAIRS.items():          # for the buy-and-hold comparison
                 for sym, t in ((tk, None), (pair["bull"], None)):
@@ -362,19 +382,21 @@ def run(data, start, end=None):
         "generated": dt.datetime.now(ET).strftime("%Y-%m-%d %H:%M ET"),
         "start": days[0], "end": last_day, "trading_days": len(days), "feed": data.feed,
         "note": f"{LEV}x ETFs, ${TRADE_DOLLARS:.0f} per buy, ${SLIPPAGE} per share each way for the spread. "
-                f"Buy and hold over this period: {bh}. " + eng.edge_note(),
-        "groups": [{k: g[k] for k in ("key", "name", "desc", "color", "models")} for g in GROUPS],
+                f"Buy and hold over this period: {bh}. " +
+                ("Ladders only, using daily closes (the day-trading groups need minute data)." if daily else eng.edge_note()),
+        "groups": [{k: g[k] for k in ("key", "name", "desc", "color", "models")} for g in GROUPS
+                   if not (daily and g["kind"] == "intraday")],
         "ladder_stats": ladder_stats, "buy_hold": buy_hold,
     }
     return {"meta": meta, "trades": eng.trades, "days": eng.days, "errors": []}
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:] + ["", "", ""]
+    args = sys.argv[1:] + ["", "", "", ""]
     start = dt.date.fromisoformat(args[0] or START)
     end = dt.date.fromisoformat(args[1]) if args[1] else None
     out = DATA_DIR / (args[2] or "backtest_experimental.json")
-    result = run(AlpacaData(), start, end)
+    result = run(AlpacaData(), start, end, daily=args[3] == "daily")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, out)
     print(f"Wrote {out.name}: {len(result['trades'])} trades, {out.stat().st_size / 1e6:.1f} MB")
