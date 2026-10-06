@@ -41,7 +41,7 @@
   .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
   .stat { padding: 14px 0; border-bottom: 1px solid var(--line); }
   .stat { padding-right: 12px; }
-  .stat span { display: block; font-size: 12px; color: var(--muted); }
+  .stat > span { display: block; font-size: 12px; color: var(--muted); }
   .stat strong { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.15; }
   .pos { color: var(--gain); } .neg { color: var(--loss); }
 
@@ -155,6 +155,11 @@
   .life { text-align: right; white-space: nowrap; }
   .life span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
   .life strong { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.1; }
+  .seg.src a { font-size: 12.5px; color: var(--ink-2); text-decoration: none; border-radius: 7px; padding: 5px 12px; }
+  .seg.src a:hover { background: var(--sand); }
+  .seg.src a.on { background: var(--ink); color: #FAF7F2; }
+  .banner { margin-top: 18px; background: #F3E7D6; color: #6E5232; border-radius: 12px; padding: 12px 16px; font-size: 13.5px; }
+  .banner b { color: #4A3620; }
   .notes-card { margin-top: 2px; flex: 1 1 100%; }
   .notes-table td, .notes-table th { white-space: normal; vertical-align: top; font-size: 13px; color: var(--ink-2); }
   .notes-table td:first-child { white-space: nowrap; width: 1%; color: var(--ink); }
@@ -173,11 +178,13 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
     </div>
   </header>
+  <div class="banner hidden" id="srcBanner"></div>
 
   <div class="hero">
     <div>
@@ -254,7 +261,10 @@
 </main>
 
 <script>
-const DEMO = new URLSearchParams(location.search).has("demo");
+const PARAMS = new URLSearchParams(location.search);
+const DEMO = PARAMS.has("demo");
+let SRC = PARAMS.get("data") === "backtest" ? "backtest" : "live";
+const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
 const MODEL_KEYS = Object.keys(MODELS);
@@ -402,10 +412,41 @@ function fakeData() {
 }
 
 async function load() {
-  if (DEMO) raw = fakeData();
+  document.getElementById("srcLive").classList.toggle("on", SRC === "live");
+  document.getElementById("srcBacktest").classList.toggle("on", SRC === "backtest");
+  if (PARAMS.has("demo")) {   // keep demo mode when switching between Live and Backtest
+    document.getElementById("srcLive").href = "?demo";
+    document.getElementById("srcBacktest").href = "?demo&data=backtest";
+  }
+  const banner = document.getElementById("srcBanner");
+  banner.classList.add("hidden"); banner.innerHTML = "";
+  document.getElementById("footer").textContent = FOOTER_TEXT;
+  raw = { trades: [], days: [], errors: [] }; selected = null;
+  if (DEMO) {
+    raw = fakeData();
+    if (SRC === "backtest") { banner.classList.remove("hidden"); banner.innerHTML = "<b>Backtest (demo)</b> · Sample data. On your real site this shows the results of Actions → Backtest."; }
+  }
   else {
-    try { raw = await (await fetch("data/results.json?t=" + Date.now())).json(); }
-    catch (e) { document.getElementById("heroSub").textContent = "Couldn't load data/results.json."; return; }
+    const file = SRC === "backtest" ? "data/backtest.json" : "data/results.json";
+    try {
+      const r = await fetch(file + "?t=" + Date.now());
+      if (!r.ok) throw new Error(r.status);
+      raw = await r.json();
+    } catch (e) {
+      if (SRC === "backtest") {
+        banner.classList.remove("hidden");
+        banner.innerHTML = "<b>No backtest yet.</b> On GitHub, go to Actions → Backtest → Run workflow. Results show up here when it finishes.";
+        document.getElementById("heroSub").textContent = "Run the backtest to fill this page in.";
+      } else document.getElementById("heroSub").textContent = "Couldn't load data/results.json.";
+      return;
+    }
+  }
+  if (SRC === "backtest" && raw.meta) {
+    const m = raw.meta;
+    banner.classList.remove("hidden");
+    banner.innerHTML = `<b>Backtest</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
+      `Treat dollars as estimates; use it to compare models.`;
+    document.getElementById("footer").textContent = "Backtest results: simulated, not real trades";
   }
   if (DEMO) document.getElementById("footer").textContent = "Demo mode: sample data, not real results";
   render();
@@ -468,7 +509,7 @@ function render() {
     const num = document.getElementById("heroNum");
     num.textContent = t.length ? usd(p) : "No trade";
     num.className = "hero-num " + (t.length ? cls(p) : "");
-    document.getElementById("heroLabel").textContent = (selected === latest ? "Latest session · " : "Session · ") + short(selected);
+    document.getElementById("heroLabel").textContent = (SRC === "backtest" ? "Backtest · " : "") + (selected === latest ? "Latest session · " : "Session · ") + short(selected);
     document.getElementById("heroSub").textContent = t.length
       ? `${t.filter(x => x.pnl_usd > 0).length} of ${t.length} trades closed green. ` + MODES.map(md => {
           const g = t.filter(x => modeOf(x) === md);
@@ -616,6 +657,16 @@ document.getElementById("scorecard").addEventListener("click", e => {
   if (key === sortKey) sortDir = -sortDir; else { sortKey = key; sortDir = SORT_COLS[key].dir; }
   render();
 });
+// Switch Live / Backtest in place (no page reload), and update the address if the browser allows it
+["srcLive", "srcBacktest"].forEach(id => document.getElementById(id).addEventListener("click", e => {
+  e.preventDefault();
+  const next = id === "srcBacktest" ? "backtest" : "live";
+  if (next === SRC) return;
+  SRC = next;
+  // Update the address bar on the real site only (not inside an embedded preview)
+  if (window.self === window.top) { try { history.replaceState(null, "", e.currentTarget.getAttribute("href")); } catch (err) {} }
+  load();
+}));
 document.getElementById("toggleAll").addEventListener("click", () => {
   if (openGroups.size === MODES.length) openGroups.clear(); else MODES.forEach(m => openGroups.add(m));
   render();
