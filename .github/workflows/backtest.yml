@@ -44,7 +44,7 @@ jobs:
         run: |
           git config user.name "reversal-bot"
           git config user.email "reversal-bot@users.noreply.github.com"
-          git add data/backtest.json
+          git add data/backtest.json data/backtest_levered.json
           if git diff --staged --quiet; then echo "No changes"; exit 0; fi
           git commit -m "Backtest ${{ inputs.start }} to ${{ inputs.end || 'yesterday' }}"
           for i in 1 2 3; do
