@@ -16,6 +16,12 @@ What's real vs estimated:
     each way. Great for ranking models, not for exact dollars.
 
 Results go to data/backtest.json; the website shows them at index.html?data=backtest.
+
+It also writes data/backtest_levered.json: the EXACT same trades (same entries,
+same exit times and reasons) re-priced as 3x leveraged ETFs instead of options:
+  SPY -> UPRO (bullish) / SPXU (bearish),  QQQ -> TQQQ / SQQQ
+P&L = $100 x (3 x the ETF's move in your favor) minus an assumed spread. No time
+decay, tiny spreads, much smaller payoffs. Shown at index.html?data=levered.
 Run it from GitHub: Actions > Backtest > Run workflow.
 """
 import json
@@ -32,6 +38,11 @@ import bot  # use the live bot's exact settings and indicator math
 ET = ZoneInfo("America/New_York")
 OUT = Path("data/backtest.json")
 HALF_SPREAD = 0.01            # assumed: buy 1 cent above the estimate, sell 1 cent below
+OUT_LEV = Path("data/backtest_levered.json")
+LEV = 3                       # leveraged ETF multiple
+LEV_NOTIONAL = 100            # dollars per levered-ETF trade (same $100 as the option trades)
+LEV_HALF_SPREAD = 0.0001      # assumed: 0.01% each way on very liquid 3x ETFs
+LEV_SYMBOL = {("SPY", "CALL"): "UPRO", ("SPY", "PUT"): "SPXU", ("QQQ", "CALL"): "TQQQ", ("QQQ", "PUT"): "SQQQ"}
 START = (os.getenv("BT_START") or "2026-01-02").strip()
 END = (os.getenv("BT_END") or "").strip() or str((datetime.now(ET) - timedelta(days=1)).date())
 
@@ -225,6 +236,19 @@ def simulate(day_bars):
     return trades, days
 
 
+def to_levered(trades):
+    """Same trades, priced as 3x leveraged ETFs: long 3x for calls, inverse 3x for puts."""
+    out = []
+    for t in trades:
+        fav = t["etf_move"] if t["option"] == "CALL" else -t["etf_move"]
+        ret = LEV * fav - 2 * LEV_HALF_SPREAD
+        sym = LEV_SYMBOL[(t["ticker"], t["option"])]
+        out.append({**t, "contract": f"{sym} (3x est.)", "side": f"{sym} {'long' if t['option'] == 'CALL' else 'inverse'}",
+                    "entry": float(LEV_NOTIONAL), "exit": round(LEV_NOTIONAL * (1 + ret), 2),
+                    "pnl_pct": round(ret, 5), "pnl_usd": round(LEV_NOTIONAL * ret, 2), "levered": True})
+    return out
+
+
 def main():
     print(f"Backtest {START} to {END}")
     df, feed = fetch(START, END)
@@ -243,6 +267,19 @@ def main():
         },
         "trades": trades, "days": days, "errors": [],
     }, indent=1))
+
+    lev = to_levered(trades)
+    OUT_LEV.write_text(json.dumps({
+        "meta": {
+            "generated": datetime.now(ET).strftime("%Y-%m-%d %H:%M ET"),
+            "start": START, "end": END, "trading_days": n_days, "feed": feed,
+            "note": f"Same trades as the options backtest, priced as {LEV}x leveraged ETFs "
+                    f"(UPRO/SPXU for SPY, TQQQ/SQQQ for QQQ), ${LEV_NOTIONAL} per trade, "
+                    f"{LEV_HALF_SPREAD:.2%} spread each way, no time decay",
+        },
+        "trades": lev, "days": days, "errors": [],
+    }, indent=1))
+    print(f"3x ETF version: total {sum(t['pnl_usd'] for t in lev):,.2f} on {len(lev):,} trades")
 
     # Quick summary in the Actions log
     t = pd.DataFrame(trades)
