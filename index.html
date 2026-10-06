@@ -457,8 +457,10 @@ async function load() {
       if (SRC !== "live") {
         banner.classList.remove("hidden");
         banner.innerHTML = "<b>No backtest yet.</b> On GitHub, go to Actions → Backtest → Run workflow. Results show up here when it finishes.";
-        document.getElementById("heroSub").textContent = "Run the backtest to fill this page in.";
-      } else document.getElementById("heroSub").textContent = "Couldn't load data/results.json.";
+      }
+      raw = { trades: [], days: [], errors: [] };   // clear out the previous page's numbers
+      render();
+      document.getElementById("heroSub").textContent = SRC !== "live" ? "Run the backtest to fill this page in." : "Couldn't load data/results.json.";
       return;
     }
   }
