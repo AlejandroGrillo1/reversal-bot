@@ -193,7 +193,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a><a href="?data=imom" id="srcImom">Intraday Momentum</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -281,12 +281,14 @@ const SOURCES = {
   exp5y: { link: "srcExp5y", file: "data/backtest_experimental_5y.json", label: "Experimental, 5 years · " },
   expdown: { link: "srcExpDown", file: "data/backtest_experimental_down.json", label: "Experimental, 2022–23 · " },
   rsi: { link: "srcRsi", file: "data/backtest_rsi.json", label: "RSI models · ", tickers: ["SPY", "QQQ", "MU"] },
+  imom: { link: "srcImom", file: "data/backtest_imom.json", label: "Intraday momentum · " },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
-const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi";
+const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi" || s === "imom";
 const EXP_TITLE = { experimental: "Experimental strategies, this year", exp5y: "Experimental strategies, last 5 years",
   expdown: "Experimental strategies, 2022–23 round trip (a bear market, then a recovery to about where it started)",
-  rsi: "RSI models, this year" };
+  rsi: "RSI models, this year",
+  imom: "Intraday momentum, last 5 years (published rule, tested on years after the research)" };
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
@@ -509,6 +511,7 @@ async function load() {
     document.getElementById("srcExp5y").href = "?demo&data=exp5y";
     document.getElementById("srcExpDown").href = "?demo&data=expdown";
     document.getElementById("srcRsi").href = "?demo&data=rsi";
+    document.getElementById("srcImom").href = "?demo&data=imom";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -533,10 +536,12 @@ async function load() {
     } catch (e) {
       if (SRC !== "live") {
         banner.classList.remove("hidden");
-        const pick = { experimental: "this year", exp5y: "last 5 years", expdown: "2022-23 round trip", rsi: "RSI models" }[SRC];
+        const pick = { experimental: "this year", exp5y: "last 5 years", expdown: "2022-23 round trip" }[SRC];
+        const how = SRC === "rsi" ? "Actions → RSI models → Run workflow" : SRC === "imom" ? "Actions → Intraday momentum → Run workflow"
+          : `Actions → Experimental → Run workflow, choose “${pick}”,`;
         document.body.classList.add("nodata");
         banner.innerHTML = isExp(SRC)
-          ? `<b>No results for this tab yet.</b> Your site doesn't have <code>${SOURCES[SRC].file}</code>. On GitHub, go to Actions → Experimental → Run workflow, choose “${pick}”, and run it. ` +
+          ? `<b>No results for this tab yet.</b> Your site doesn't have <code>${SOURCES[SRC].file}</code>. On GitHub, go to ${how} and run it. ` +
             `If a run already finished, open it: a red X means it failed (paste the error to Claude); a green check means refresh this page in a minute.`
           : "<b>No backtest yet.</b> On GitHub, go to Actions → Backtest → Run workflow. Results show up here when it finishes.";
       }
