@@ -27,15 +27,22 @@ Groups (each on SPY and QQQ, three tiers each)
                  Change STAGGER_COUNT to 4 to wait for the fourth.
   RSI Reversal 9 : exactly RSI Reversal, but on a 9-period RSI (the last 9 minutes)
                  instead of 14, so it reacts faster and signals more often.
+  RSI Reversal 80/20 : exactly RSI Reversal, but with stricter extremes: under 20 then
+                 back above 20 -> bull ETF; over 80 then back below 80 -> bear ETF.
+                 Fewer, more stretched signals.
+  Random control : the yardstick. Enters at random minutes between 9:35 and 1:00
+                 and flips a coin for direction, with the same tiers, exits and limits.
+                 An RSI group only has a real signal if it clearly beats this.
+                 (Seeded, so it makes the same "random" picks every run.)
   Top-outs and bottom-outs are counted from 9:30; trades still start at 9:35.
 
 Rules for every model
-  New trades from 9:35 to 12:00 ET. One trade open at a time, at most 5 per day.
-  Targets on the stock's own move, stop at half the target (1:2):
-      SPY / QQQ : Conservative +0.25%, Moderate +0.45%, Aggressive +0.65%
-      MU        : Conservative +0.50%, Moderate +0.90%, Aggressive +1.30%
-  (MU's targets are 2x SPY / QQQ's.)
-  A trade that hasn't hit its target or stop by 2:30 PM is sold then if it's
+  New trades from 9:35 AM to 1:00 PM ET. One trade open at a time, at most 5 per day.
+  Targets on the stock's own move, stop the same size as the target (1:1):
+      SPY / QQQ : Conservative ±0.17%, Moderate ±0.30%, Aggressive ±0.44%
+      MU        : Conservative ±0.34%, Moderate ±0.60%, Aggressive ±0.87%
+  (MU's are 2x SPY / QQQ's. At 1:1, random entries win about half the time.)
+  A trade that hasn't hit its target or stop by 3:30 PM is sold then if it's
   in the green; otherwise it holds (target and stop still live) until 3:55.
   Priced like the other 3x pages: real ETF price at entry, exit at 3x the
   SPY / QQQ move, $0.005 per share each way.
@@ -48,6 +55,7 @@ Rules for every model
 
 import json
 import os
+import random
 import sys
 import datetime as dt
 
@@ -56,17 +64,19 @@ import experimental as X          # shares the Alpaca data code and price tools
 START = "2026-01-01"
 RSI_LEN = 14
 RSI_FAST = 9                      # for the RSI Reversal 9 group
-FIRST_SIGNAL, LAST_TIME = "09:35", "12:00"      # window for NEW trades
-GREEN_CHECK, EOD_TIME = "14:30", "15:55"         # sell at 2:30 if green, else hold to 3:55
+FIRST_SIGNAL, LAST_TIME = "09:35", "13:00"      # window for NEW trades
+GREEN_CHECK, EOD_TIME = "15:30", "15:55"         # sell at 3:30 if green, else hold to 3:55
 MAX_TRADES = 5
 STAGGER_COUNT = 3                 # RSI Third touch trades the Nth extreme in a row
 ORD = {2: "2nd", 3: "3rd"}.get(STAGGER_COUNT, f"{STAGGER_COUNT}th")
-# Target % of the stock's own move, per ticker; the stop is always half the target.
+# Target % of the stock's own move, per ticker. STOP_RATIO 1.0 = stop as big as the target (1:1).
 TIERS = {
-    "SPY": {"Conservative": 0.25, "Moderate": 0.45, "Aggressive": 0.65},
-    "QQQ": {"Conservative": 0.25, "Moderate": 0.45, "Aggressive": 0.65},
-    "MU":  {"Conservative": 0.50, "Moderate": 0.90, "Aggressive": 1.30},
+    "SPY": {"Conservative": 0.17, "Moderate": 0.30, "Aggressive": 0.44},
+    "QQQ": {"Conservative": 0.17, "Moderate": 0.30, "Aggressive": 0.44},
+    "MU":  {"Conservative": 0.34, "Moderate": 0.60, "Aggressive": 0.87},
 }
+STOP_RATIO = 1.0
+RANDOM_CANDIDATES = 8             # random entry times offered to the Random control each day
 TIER_NAMES = list(TIERS["SPY"])
 LEV, SLIP, TRADE = X.LEV, X.SLIPPAGE, X.TRADE_DOLLARS
 # ticker -> its 3x bull / bear ETFs. None = no 3x ETF exists, so it's priced as a 3x estimate.
@@ -74,23 +84,27 @@ PAIRS = {**X.PAIRS, "MU": {"bull": None, "bear": None}}
 MU_COST = 0.0003                  # round-trip cost for the 3x estimate (0.03% of the trade)
 OUT = X.DATA_DIR / "backtest_rsi.json"
 
-MODELS = [{"key": k, "rule": f"SPY/QQQ +{TIERS['SPY'][k]:.2f}% · MU +{TIERS['MU'][k]:.2f}% · stop at half (3× ≈ +{TIERS['SPY'][k] * LEV:.2f}% / +{TIERS['MU'][k] * LEV:.2f}%)"}
+MODELS = [{"key": k, "rule": f"SPY/QQQ ±{TIERS['SPY'][k]:.2f}% · MU ±{TIERS['MU'][k]:.2f}% · 1:1 (3× ≈ ±{TIERS['SPY'][k] * LEV:.2f}% / ±{TIERS['MU'][k] * LEV:.2f}%)"}
           for k in TIER_NAMES]
 GROUPS = [
     {"key": "rsi_rev", "name": "RSI Reversal", "color": "#2B2722", "bull": "up30", "bear": "down70",
-     "desc": "Back above 30 → bull ETF · back below 70 → bear ETF · new trades 9:35–12:00, max 5 a day"},
+     "desc": "Back above 30 → bull ETF · back below 70 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_mom", "name": "RSI Momentum", "color": "#4C7A5B", "bull": "up60", "bear": "down40",
-     "desc": "Crosses up through 60 → bull ETF · down through 40 → bear ETF · new trades 9:35–12:00, max 5 a day"},
+     "desc": "Crosses up through 60 → bull ETF · down through 40 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_long", "name": "RSI Long only", "color": "#3F6E8C", "bull": "up30", "bear": None,
-     "desc": "Only the buys: back above 30 → bull ETF · new trades 9:35–12:00, max 5 a day"},
+     "desc": "Only the buys: back above 30 → bull ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_short", "name": "RSI Short only", "color": "#8C5A3C", "bull": None, "bear": "down70",
-     "desc": "Only the sells: back below 70 → bear ETF · new trades 9:35–12:00, max 5 a day"},
+     "desc": "Only the sells: back below 70 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_clean", "name": "RSI Clean reversal", "color": "#6B4C7A", "bull": "clean_up30", "bear": "clean_down70",
-     "desc": "Trades the 3rd extreme of a clean alternating run (bottom, top, bottom or top, bottom, top) · new trades 9:35–12:00, max 5 a day"},
+     "desc": "Trades the 3rd extreme of a clean alternating run (bottom, top, bottom or top, bottom, top) · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_third", "name": "RSI Third touch", "color": "#8A7A2E", "bull": "third_up30", "bear": "third_down70",
-     "desc": f"Trades the {ORD} top-out or bottom-out in a row, as a reversal · new trades 9:35–12:00, max 5 a day"},
+     "desc": f"Trades the {ORD} top-out or bottom-out in a row, as a reversal · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_rev9", "name": "RSI Reversal 9", "color": "#5E8F99", "bull": "r9_up30", "bear": "r9_down70",
      "desc": f"Same as RSI Reversal on a {RSI_FAST}-period RSI · back above 30 → bull ETF · back below 70 → bear ETF"},
+    {"key": "rsi_rev8020", "name": "RSI Reversal 80/20", "color": "#A35D5D", "bull": "up20", "bear": "down80",
+     "desc": "Back above 20 → bull ETF · back below 80 → bear ETF · new trades 9:35–1:00, max 5 a day"},
+    {"key": "rsi_random", "name": "Random control", "color": "#9A9083", "bull": "rand_up", "bear": "rand_down",
+     "desc": "Random entry times and a coin flip for direction · same tiers and exits · the yardstick to beat"},
 ]
 
 
@@ -112,7 +126,7 @@ def wilder_rsi(closes, n=RSI_LEN):
 
 def signals(times, rsi):
     """{'up30': [minute, ...], 'down70': [...], 'up60': [...], 'down40': [...]} by the minute the signal closed."""
-    sig = {k: [] for k in ("up30", "down70", "up60", "down40",
+    sig = {k: [] for k in ("up30", "down70", "up60", "down40", "up20", "down80",
                            "clean_up30", "clean_down70", "third_up30", "third_down70")}
     extremes = []                                    # ("B" or "T", minute), counted from 9:30
     for i in range(1, len(times)):
@@ -127,6 +141,8 @@ def signals(times, rsi):
         if a > 70 >= b: sig["down70"].append(t)
         if a < 60 <= b: sig["up60"].append(t)
         if a > 40 >= b: sig["down40"].append(t)
+        if a < 20 <= b: sig["up20"].append(t)
+        if a > 80 >= b: sig["down80"].append(t)
     kinds = [k for k, _ in extremes]
     for i, (k, t) in enumerate(extremes):
         if t < FIRST_SIGNAL:
@@ -187,6 +203,13 @@ class Engine:
             sig = signals(times, wilder_rsi(closes)[len(warm):])
             fast = signals(times, wilder_rsi(closes, RSI_FAST)[len(warm):])
             sig.update({"r9_" + k: v for k, v in fast.items()})
+            # Random control: random minutes in the entry window, coin-flip direction (seeded per day + ticker)
+            rng = random.Random(f"{day}|{tk}")
+            window = [t for t in times if FIRST_SIGNAL <= t < LAST_TIME]
+            picks = sorted(rng.sample(window, min(RANDOM_CANDIDATES, len(window))))
+            sig["rand_up"], sig["rand_down"] = [], []
+            for t in picks:
+                sig["rand_up" if rng.random() < 0.5 else "rand_down"].append(t)
             for g in GROUPS:
                 events = sorted([(t, True) for t in (sig[g["bull"]] if g["bull"] else [])] +
                                 [(t, False) for t in (sig[g["bear"]] if g["bear"] else [])])
@@ -208,7 +231,7 @@ class Engine:
                     tally = ", ".join(f"{model} {len(c)}" for model, c in zip(TIER_NAMES, counts))
                     note = f"Trades by model: {tally}"
                 else:
-                    note = "No RSI signal between 9:35 and 12:00"
+                    note = "No signal between 9:35 and 1:00"
                 self.days.append({"date": day, "ticker": tk, "mode": g["key"], "direction": "",
                                   "traded": bool(best), "note": note})
 
@@ -224,15 +247,15 @@ class Engine:
             entry_fill, cost = 100.0, 100.0 * MU_COST
         if not p_in or not etf_raw:
             return None
-        tgt, stp = p_in * (1 + d * tp / 100), p_in * (1 - d * tp / 200)
+        tgt, stp = p_in * (1 + d * tp / 100), p_in * (1 - d * tp * STOP_RATIO / 100)
         value = lambda u: max(0.01, etf_raw * (1 + LEV * d * (u / p_in - 1)) - cost)
         hit, checked = None, False
         for t, (o, h, l, c) in X.after(ub, t_in, EOD_TIME):
             if t != t_in and d * (o - stp) <= 0: hit = (t, o, "stop"); break
             if t != t_in and d * (o - tgt) >= 0: hit = (t, o, "target"); break
-            if t >= GREEN_CHECK and not checked:          # 2:30 PM: take it if it's in the green
+            if t >= GREEN_CHECK and not checked:          # 3:30 PM: take it if it's in the green
                 checked = True
-                if value(o) > entry_fill: hit = (t, o, "2:30 green"); break
+                if value(o) > entry_fill: hit = (t, o, "3:30 green"); break
             worst, best = (l, h) if bull else (h, l)
             if d * (worst - stp) <= 0: hit = (t, stp, "stop"); break       # both in one minute: stop first
             if d * (best - tgt) >= 0: hit = (t, tgt, "target"); break
@@ -275,11 +298,13 @@ def run(data, start):
         "generated": dt.datetime.now(X.ET).strftime("%Y-%m-%d %H:%M ET"),
         "start": days[0], "end": days[-1], "trading_days": len(days), "feed": data.feed,
         "note": (f"{RSI_LEN}-period RSI on 1-minute SPY/QQQ closes ({RSI_FAST}-period for RSI Reversal 9), warmed up with the prior afternoon (overnight gap removed). "
-                 f"New trades 9:35–12:00, bought at the next minute's open; one trade at a time, max {MAX_TRADES} per model per day. "
-                 f"No target or stop by 2:30 PM: sold then if green, otherwise held to 3:55. {LEV}x ETFs, ${TRADE:.0f} per trade, ${SLIP} per share each way. "
+                 f"Targets and stops are the same size (1:1), so random entries win about half the time; compare every group with Random control. "
+                 f"New trades 9:35 AM–1:00 PM, bought at the next minute's open; one trade at a time, max {MAX_TRADES} per model per day. "
+                 f"No target or stop by 3:30 PM: sold then if green, otherwise held to 3:55. {LEV}x ETFs, ${TRADE:.0f} per trade, ${SLIP} per share each way. "
                  f"MU has no 3x ETF, so MU trades are a 3x estimate from Micron's own move, {MU_COST * 100:.2f}% round-trip cost"),
         "groups": [{k: g[k] for k in ("key", "name", "desc", "color")} | {"models": MODELS} for g in GROUPS],
         "tickers": list(PAIRS),
+        "entry_window": [FIRST_SIGNAL, LAST_TIME],          # shaded on the Day chart
     }
     return {"meta": meta, "trades": eng.trades, "days": eng.days, "bars": eng.bars, "errors": []}
 
