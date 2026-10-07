@@ -353,14 +353,14 @@ let raw = { trades: [], days: [] }, charts = {}, selected = null;
 const openGroups = new Set();
 // Scorecard sorting: click a column title to sort by it, click again to flip the order
 // How trades ended: target / stop / 2:30 green / end of day / anything else
-const EXIT_KINDS = [["target", "Target", "var(--gain)"], ["stop", "Stop", "var(--loss)"], ["green", "2:30 green", "#8FB59A"], ["eod", "End of day", "var(--muted)"], ["other", "Other", "var(--sand-2)"]];
+const EXIT_KINDS = [["target", "Target", "var(--gain)"], ["stop", "Stop", "var(--loss)"], ["green", "Green at cutoff", "#8FB59A"], ["eod", "End of day", "var(--muted)"], ["other", "Other", "var(--sand-2)"]];
 const exitKind = r => { r = (r || "").toLowerCase();
   return r.includes("target") ? "target" : r.includes("stop") ? "stop" : r.includes("green") ? "green" : (r.includes("end of day") || r.includes("close")) ? "eod" : "other"; };
 const exitMix = ts => { const c = { target: 0, stop: 0, green: 0, eod: 0, other: 0 }; ts.forEach(t => c[exitKind(t.reason)]++); return c; };
 const exitCell = (c, n) => !n ? `<td class="hint">–</td>` :
   `<td class="exits" title="${EXIT_KINDS.filter(([k]) => c[k]).map(([k, lab]) => `${lab}: ${c[k]} (${Math.round(c[k] / n * 100)}%)`).join(" · ")}">` +
   `<span class="xbar">${EXIT_KINDS.filter(([k]) => c[k]).map(([k, , col]) => `<i style="width:${c[k] / n * 100}%;background:${col}"></i>`).join("")}</span>` +
-  `<small>${EXIT_KINDS.filter(([k]) => c[k] && k !== "other").map(([k, lab]) => `${k === "target" ? "<b>" : ""}${lab.replace("End of day", "EOD")} ${c[k] / n < 0.005 ? "<1" : Math.round(c[k] / n * 100)}%${k === "target" ? "</b>" : ""}`).join(" · ")}</small></td>`;
+  `<small>${EXIT_KINDS.filter(([k]) => c[k] && k !== "other").map(([k, lab]) => `${k === "target" ? "<b>" : ""}${lab.replace("End of day", "EOD").replace("Green at cutoff", "Cutoff green")} ${c[k] / n < 0.005 ? "<1" : Math.round(c[k] / n * 100)}%${k === "target" ? "</b>" : ""}`).join(" · ")}</small></td>`;
 const SORT_COLS = {
   group: { label: "Group", get: r => MODES.indexOf(r.mode) * 10 + TICKERS.indexOf(r.tk), dir: 1 },
   model: { label: "Model", get: r => MODEL_KEYS.indexOf(r.m), dir: 1 },
@@ -648,7 +648,8 @@ function drawDayChart() {
   let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
   const X = i => L + (i / (N - 1)) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   let g = "";
-  g += `<rect x="${X(5)}" y="${T}" width="${X(150) - X(5)}" height="${H - T - B}" fill="var(--sand)" opacity="0.55"/>`;      // 9:35-12:00
+  const win = (raw.meta && raw.meta.entry_window) || null;                    // new-trade window from the results file
+  if (win) g += `<rect x="${X(minOf(win[0]))}" y="${T}" width="${X(minOf(win[1])) - X(minOf(win[0]))}" height="${H - T - B}" fill="var(--sand)" opacity="0.55"/>`;
   for (let k = 0; k <= 4; k++) { const v = lo + (hi - lo) * k / 4, y = Y(v);
     g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 8}" y="${y + 4}" text-anchor="end">${v.toFixed(2)}</text>`; }
   (narrow ? [[0, "9:30"], [90, "11"], [210, "1"], [330, "3"], [389, "4"]]
