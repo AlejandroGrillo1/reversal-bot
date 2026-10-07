@@ -1,0 +1,45 @@
+name: Intraday momentum
+
+on:
+  schedule:
+    - cron: "40 20 * * 1-5"   # 4:40 PM New York time in summer (EDT)
+    - cron: "40 21 * * 1-5"   # 4:40 PM New York time in winter (EST)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: experimental        # same queue as the other backtests so pushes never collide
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the files are there
+        run: |
+          for f in intraday_momentum.py experimental.py; do
+            if [ ! -f "$f" ]; then echo "::error::$f is missing from the repo. Upload it to the main folder."; exit 1; fi
+          done
+      - run: pip install alpaca-py
+      - name: Run intraday momentum backtest (last 5 years)
+        run: python intraday_momentum.py 2021-10-01
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+      - name: Save results
+        run: |
+          ls -la data/backtest_imom.json || { echo "::error::The backtest finished but data/backtest_imom.json wasn't created."; exit 1; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add data/backtest_imom.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Intraday momentum: update"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
+          exit 1
