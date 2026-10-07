@@ -193,7 +193,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a><a href="?data=imom" id="srcImom">Intraday Momentum</a><a href="?data=lab" id="srcLab">Idea Lab</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a><a href="?data=imom" id="srcImom">Intraday Momentum</a><a href="?data=lab" id="srcLab">Idea Lab</a><a href="?data=swing" id="srcSwing">Swing (long history)</a><a href="?data=custom" id="srcCustom">Custom run</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -283,14 +283,18 @@ const SOURCES = {
   rsi: { link: "srcRsi", file: "data/backtest_rsi.json", label: "RSI models · ", tickers: ["SPY", "QQQ", "MU"] },
   imom: { link: "srcImom", file: "data/backtest_imom.json", label: "Intraday momentum · " },
   lab: { link: "srcLab", file: "data/backtest_lab.json", label: "Idea lab · " },
+  swing: { link: "srcSwing", file: "data/backtest_swing.json", label: "Swing, long history · " },
+  custom: { link: "srcCustom", file: "data/backtest_custom.json", label: "Custom run · " },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
-const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi" || s === "imom" || s === "lab";
+const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi" || s === "imom" || s === "lab" || s === "swing" || s === "custom";
 const EXP_TITLE = { experimental: "Experimental strategies, this year", exp5y: "Experimental strategies, last 5 years",
   expdown: "Experimental strategies, 2022–23 round trip (a bear market, then a recovery to about where it started)",
   rsi: "RSI models, this year",
   imom: "Intraday momentum, last 5 years (published rule, tested on years after the research)",
-  lab: "Idea lab, this year: ten different ideas against a Random control" };
+  lab: "Idea lab, this year: ten different ideas against a Random control",
+  swing: "Swing models, long history: RSI(2) and Turn of the month against random twins",
+  custom: "Custom run" };
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
@@ -515,6 +519,8 @@ async function load() {
     document.getElementById("srcRsi").href = "?demo&data=rsi";
     document.getElementById("srcImom").href = "?demo&data=imom";
     document.getElementById("srcLab").href = "?demo&data=lab";
+    document.getElementById("srcSwing").href = "?demo&data=swing";
+    document.getElementById("srcCustom").href = "?demo&data=custom";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -540,7 +546,8 @@ async function load() {
       if (SRC !== "live") {
         banner.classList.remove("hidden");
         const pick = { experimental: "this year", exp5y: "last 5 years", expdown: "2022-23 round trip" }[SRC];
-        const how = SRC === "rsi" ? "Actions → RSI models → Run workflow" : SRC === "imom" ? "Actions → Intraday momentum → Run workflow" : SRC === "lab" ? "Actions → Idea lab → Run workflow"
+        const how = SRC === "rsi" ? "Actions → RSI models → Run workflow" : SRC === "imom" ? "Actions → Intraday momentum → Run workflow" : SRC === "lab" ? "Actions → Idea lab → Run workflow" : SRC === "swing" ? "Actions → Swing long history → Run workflow"
+          : SRC === "custom" ? "Actions → Custom run → Run workflow, pick a model and dates,"
           : `Actions → Experimental → Run workflow, choose “${pick}”,`;
         document.body.classList.add("nodata");
         banner.innerHTML = isExp(SRC)
@@ -559,10 +566,10 @@ async function load() {
   if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
-    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : SRC === "nohold" ? "3× ETF backtest, no 5-min exit" : isExp(SRC) ? EXP_TITLE[SRC] : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
+    banner.innerHTML = `<b>${SRC === "levered" ? "3× leveraged ETF backtest" : SRC === "nohold" ? "3× ETF backtest, no 5-min exit" : isExp(SRC) ? (SRC === "custom" && raw.meta.run_label ? raw.meta.run_label : EXP_TITLE[SRC]) : "Options backtest"}</b> · ${short(m.start)} to ${short(m.end)} · ${m.trading_days} trading days · ${m.note}. Run ${m.generated}. ` +
       (SRC === "levered" ? `Same entries and exits as the options backtest, only the instrument changes.` :
        SRC === "nohold" ? `Compare with the 3× ETFs page: same entries, only the 5-minute hold exits are removed.` :
-       isExp(SRC) ? (SRC === "rsi" ? "" : `Ladder groups show trades on the day they closed. Anything still held is sold at the last close ("closed at run end") so totals are current; the scorecard's Open P&L column shows how those positions did.`) : `Treat dollars as estimates; use it to compare models.`);
+       isExp(SRC) ? (!["experimental", "exp5y", "expdown", "swing"].includes(SRC) ? "" : `Multi-day groups show trades on the day they closed. Anything still held is sold at the last close ("closed at run end") so totals are current; the scorecard's Open P&L column shows how those positions did.`) : `Treat dollars as estimates; use it to compare models.`);
     if (m.ladder_stats && m.ladder_stats.length) {
       const nm = k => (m.groups.find(g => g.key === k) || {}).name || k;
       const bh = Object.fromEntries((m.buy_hold || []).map(b => [b.ticker, b]));
@@ -573,6 +580,15 @@ async function load() {
           <td class="num ${r.worst_open < 0 ? "neg" : ""}">${r.worst_open < 0 ? usd(r.worst_open) + ` <small class="hint">${short(r.worst_date)}</small>` : "–"}</td>
           <td class="num">${bh[r.ticker] ? `<span class="${cls(bh[r.ticker].etf_ret)}">${pct(bh[r.ticker].etf_ret)}</span> <small class="hint">${bh[r.ticker].etf}</small>` : "–"}</td></tr>`).join("") +
         `</table></div><p class="hint" style="margin:6px 0 0">Return on that money = total P&amp;L ÷ the most it ever had invested. Worst paper loss = the deepest the open rungs were underwater at a close. Buy &amp; hold = $100 in the 3× ETF on day one, sold on the last day.</p>`;
+    }
+    if (m.yearly && Object.keys(m.yearly).length) {
+      const years = [...new Set(Object.values(m.yearly).flatMap(o => Object.keys(o)))].sort();
+      const gname = k => (m.groups.find(g => g.key === k) || {}).name || k;
+      const order = m.groups.map(g => g.key).filter(k => m.yearly[k]);
+      banner.innerHTML += `<div class="table-wrap" style="margin-top:12px"><table class="notes-table"><tr><th>Year by year</th>${years.map(y => `<th class="num">${y}</th>`).join("")}<th class="num">Total</th></tr>` +
+        order.map(k => { const row = m.yearly[k], tot = years.reduce((a, y) => a + (row[y] || 0), 0);
+          return `<tr><td><b>${gname(k)}</b></td>${years.map(y => `<td class="num ${cls(row[y] || 0)}">${row[y] != null ? usd(row[y]) : "–"}</td>`).join("")}<td class="num ${cls(tot)}"><b>${usd(tot)}</b></td></tr>`; }).join("") +
+        `</table></div><p class="hint" style="margin:6px 0 0">Both tickers and all three tiers added together, by the year each trade closed. A model with real timing skill should beat its random twin in most years, not just overall.</p>`;
     }
     if (typeof staleRsi !== "undefined" && staleRsi)
       banner.innerHTML += `<p style="margin:10px 0 0"><b>MU has no results yet.</b> This RSI file was made before Micron was added. On GitHub, go to Actions → Experimental → Run workflow, choose “RSI models”, and run it with the latest rsi_models.py.</p>`;
