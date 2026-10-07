@@ -2,7 +2,7 @@ name: Experimental
 
 on:
   schedule:
-    - cron: "20 20 * * 1-5"   # 4:20 PM New York time in summer (EDT): updates "this year" only
+    - cron: "20 20 * * 1-5"   # 4:20 PM New York time in summer (EDT): updates "this year" and RSI models
     - cron: "20 21 * * 1-5"   # 4:20 PM New York time in winter (EST)
   workflow_dispatch:
     inputs:
@@ -12,9 +12,10 @@ on:
         default: "this year"
         options:
           - "this year"
+          - "RSI models"
           - "last 5 years"
           - "2022-23 round trip"
-          - "all three"
+          - "everything"
 
 permissions:
   contents: write
@@ -37,15 +38,18 @@ jobs:
         env:
           ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
-          WHICH: ${{ github.event.inputs.which || 'this year' }}
+          WHICH: ${{ github.event.inputs.which || 'daily' }}
         run: |
-          if [ "$WHICH" = "this year" ] || [ "$WHICH" = "all three" ]; then
+          if [ "$WHICH" = "this year" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
             python experimental.py 2026-01-01 "" backtest_experimental.json
           fi
-          if [ "$WHICH" = "last 5 years" ] || [ "$WHICH" = "all three" ]; then
+          if [ "$WHICH" = "RSI models" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
+            python rsi_models.py 2026-01-01
+          fi
+          if [ "$WHICH" = "last 5 years" ] || [ "$WHICH" = "everything" ]; then
             python experimental.py 2021-10-01 "" backtest_experimental_5y.json daily
           fi
-          if [ "$WHICH" = "2022-23 round trip" ] || [ "$WHICH" = "all three" ]; then
+          if [ "$WHICH" = "2022-23 round trip" ] || [ "$WHICH" = "everything" ]; then
             python experimental.py 2022-01-01 2023-12-29 backtest_experimental_down.json daily
           fi
       - name: Save results
@@ -53,7 +57,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
           git add data/backtest_experimental*.json
+          if [ -f data/backtest_rsi.json ]; then git add data/backtest_rsi.json; fi
           git diff --cached --quiet && { echo "No changes"; exit 0; }
-          git commit -m "Experimental: ${{ github.event.inputs.which || 'this year' }}"
+          git commit -m "Experimental: ${{ github.event.inputs.which || 'daily update' }}"
           for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
           exit 1
