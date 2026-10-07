@@ -275,7 +275,7 @@ const SOURCES = {
   experimental: { link: "srcExperimental", file: "data/backtest_experimental.json", label: "Experimental · " },
   exp5y: { link: "srcExp5y", file: "data/backtest_experimental_5y.json", label: "Experimental, 5 years · " },
   expdown: { link: "srcExpDown", file: "data/backtest_experimental_down.json", label: "Experimental, 2022–23 · " },
-  rsi: { link: "srcRsi", file: "data/backtest_rsi.json", label: "RSI models · " },
+  rsi: { link: "srcRsi", file: "data/backtest_rsi.json", label: "RSI models · ", tickers: ["SPY", "QQQ", "MU"] },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
 const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi";
@@ -528,7 +528,8 @@ async function load() {
       return;
     }
   }
-  if (raw.meta && raw.meta.groups) applyGroups(raw.meta.groups, raw.meta.tickers);
+  if (raw.meta && raw.meta.groups) applyGroups(raw.meta.groups, raw.meta.tickers || SOURCES[SRC].tickers);
+  const staleRsi = !DEMO && SRC === "rsi" && !(raw.trades || []).some(t => t.ticker === "MU");
   if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
@@ -547,6 +548,8 @@ async function load() {
           <td class="num">${bh[r.ticker] ? `<span class="${cls(bh[r.ticker].etf_ret)}">${pct(bh[r.ticker].etf_ret)}</span> <small class="hint">${bh[r.ticker].etf}</small>` : "–"}</td></tr>`).join("") +
         `</table></div><p class="hint" style="margin:6px 0 0">Return on that money = total P&amp;L ÷ the most it ever had invested. Worst paper loss = the deepest the open rungs were underwater at a close. Buy &amp; hold = $100 in the 3× ETF on day one, sold on the last day.</p>`;
     }
+    if (typeof staleRsi !== "undefined" && staleRsi)
+      banner.innerHTML += `<p style="margin:10px 0 0"><b>MU has no results yet.</b> This RSI file was made before Micron was added. On GitHub, go to Actions → Experimental → Run workflow, choose “RSI models”, and run it with the latest rsi_models.py.</p>`;
     document.getElementById("footer").textContent = "Backtest results: simulated, not real trades";
   }
   if (DEMO) document.getElementById("footer").textContent = "Demo mode: sample data, not real results";
