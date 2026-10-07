@@ -193,7 +193,7 @@
   <header>
     <div class="mark">Reversal <span>/ 10:30</span></div>
     <div class="controls">
-      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a><a href="?data=imom" id="srcImom">Intraday Momentum</a></div>
+      <div class="seg src" role="group" aria-label="Data source"><a href="?" id="srcLive">Live</a><a href="?data=backtest" id="srcBacktest">Backtest</a><a href="?data=levered" id="srcLevered">3× ETFs</a><a href="?data=nohold" id="srcNohold">3× no 5-min exit</a><a href="?data=experimental" id="srcExperimental">Experimental</a><a href="?data=exp5y" id="srcExp5y">Exp. 5 years</a><a href="?data=expdown" id="srcExpDown">Exp. 2022–23</a><a href="?data=rsi" id="srcRsi">RSI Models</a><a href="?data=imom" id="srcImom">Intraday Momentum</a><a href="?data=lab" id="srcLab">Idea Lab</a></div>
       <span class="pill" id="statusPill"><span class="dot"></span>Paper trading · SPY · QQQ</span>
       <label class="toggle"><input type="checkbox" id="showTest"> Include test runs</label>
       <label class="toggle" title="Trades tracked on the ETF price with estimated P&amp;L when the option side failed"><input type="checkbox" id="showFallback" checked> Include ETF-estimate trades</label>
@@ -282,13 +282,15 @@ const SOURCES = {
   expdown: { link: "srcExpDown", file: "data/backtest_experimental_down.json", label: "Experimental, 2022–23 · " },
   rsi: { link: "srcRsi", file: "data/backtest_rsi.json", label: "RSI models · ", tickers: ["SPY", "QQQ", "MU"] },
   imom: { link: "srcImom", file: "data/backtest_imom.json", label: "Intraday momentum · " },
+  lab: { link: "srcLab", file: "data/backtest_lab.json", label: "Idea lab · " },
 };
 let SRC = SOURCES[PARAMS.get("data")] ? PARAMS.get("data") : "live";
-const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi" || s === "imom";
+const isExp = s => s === "experimental" || s === "exp5y" || s === "expdown" || s === "rsi" || s === "imom" || s === "lab";
 const EXP_TITLE = { experimental: "Experimental strategies, this year", exp5y: "Experimental strategies, last 5 years",
   expdown: "Experimental strategies, 2022–23 round trip (a bear market, then a recovery to about where it started)",
   rsi: "RSI models, this year",
-  imom: "Intraday momentum, last 5 years (published rule, tested on years after the research)" };
+  imom: "Intraday momentum, last 5 years (published rule, tested on years after the research)",
+  lab: "Idea lab, this year: ten different ideas against a Random control" };
 const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
@@ -512,6 +514,7 @@ async function load() {
     document.getElementById("srcExpDown").href = "?demo&data=expdown";
     document.getElementById("srcRsi").href = "?demo&data=rsi";
     document.getElementById("srcImom").href = "?demo&data=imom";
+    document.getElementById("srcLab").href = "?demo&data=lab";
   }
   const banner = document.getElementById("srcBanner");
   banner.classList.add("hidden"); banner.innerHTML = "";
@@ -537,7 +540,7 @@ async function load() {
       if (SRC !== "live") {
         banner.classList.remove("hidden");
         const pick = { experimental: "this year", exp5y: "last 5 years", expdown: "2022-23 round trip" }[SRC];
-        const how = SRC === "rsi" ? "Actions → RSI models → Run workflow" : SRC === "imom" ? "Actions → Intraday momentum → Run workflow"
+        const how = SRC === "rsi" ? "Actions → RSI models → Run workflow" : SRC === "imom" ? "Actions → Intraday momentum → Run workflow" : SRC === "lab" ? "Actions → Idea lab → Run workflow"
           : `Actions → Experimental → Run workflow, choose “${pick}”,`;
         document.body.classList.add("nodata");
         banner.innerHTML = isExp(SRC)
@@ -643,8 +646,11 @@ function drawDayChart() {
   const svg = document.getElementById("dcSvg"), tk = document.getElementById("dcTk").value;
   const [mode, model] = (document.getElementById("dcModel").value || "|").split("|");
   const closes = ((raw.bars[DC.day] || {})[tk]) || [];
-  const ts = raw.trades.filter(t => t.date === DC.day && t.ticker === tk && modeOf(t) === mode && t.model === model && t.entry_time);
-  document.getElementById("dcCount").textContent = ts.length ? `${ts.length} trade${ts.length > 1 ? "s" : ""} · ${usd(sum(ts.map(t => t.pnl_usd)))}` : "No trades this day";
+  const all = raw.trades.filter(t => t.date === DC.day && t.ticker === tk && modeOf(t) === mode && t.model === model && t.entry_time);
+  const ts = all.filter(t => !t.entry_date || t.entry_date === t.exit_date);          // multi-day trades span several charts
+  const multi = all.length - ts.length;
+  document.getElementById("dcCount").textContent = (ts.length ? `${ts.length} trade${ts.length > 1 ? "s" : ""} · ${usd(sum(ts.map(t => t.pnl_usd)))}` : "No trades this day")
+    + (multi ? ` · ${multi} multi-day trade${multi > 1 ? "s" : ""} closed today (see the trade log)` : "");
   if (!closes.length) { svg.setAttribute("viewBox", "0 0 1000 120"); svg.innerHTML = `<text x="500" y="60" text-anchor="middle">No price data for this day</text>`; return; }
   const W = Math.max(300, Math.round(svg.getBoundingClientRect().width) || 1000), narrow = W < 600;   // draw at real pixel size so text stays readable
   const H = narrow ? 280 : 360, L = narrow ? 46 : 56, R = 10, T = 12, B = 28, N = Math.max(390, closes.length);
