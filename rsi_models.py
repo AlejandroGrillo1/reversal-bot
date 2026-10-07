@@ -54,7 +54,7 @@ Rules for every model
   trades are a 3x estimate: $100 x 3 x MU's move, minus MU_COST round trip.
   Same signals, tiers and rules as SPY and QQQ.
 
-    python rsi_models.py [START_DATE]       (default 2026-01-01)
+    python rsi_models.py [START] [END] [OUTPUT FILE]     (default 2026-01-01 to the latest close)
 """
 
 import json
@@ -282,9 +282,10 @@ class Engine:
         return t_out
 
 
-def run(data, start):
+def run(data, start, end=None):
     now = dt.datetime.now(X.ET)
-    end = now.date() if now.time() >= dt.time(16, 5) else now.date() - dt.timedelta(days=1)
+    latest = now.date() if now.time() >= dt.time(16, 5) else now.date() - dt.timedelta(days=1)
+    end = min(end or latest, latest)
     closes = data.daily_closes(["SPY"], start - dt.timedelta(days=10), end)
     all_days = [d for d, _ in closes.get("SPY", [])]
     days = [d for d in all_days if d >= start.isoformat()]
@@ -318,8 +319,12 @@ def run(data, start):
 
 
 if __name__ == "__main__":
-    start = dt.date.fromisoformat(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else START)
-    result = run(X.AlpacaData(), start)
+    # python rsi_models.py [START] [END] [OUTPUT FILE]   (blank END = latest close)
+    a = sys.argv[1:] + ["", "", ""]
+    start = dt.date.fromisoformat(a[0] or START)
+    end = dt.date.fromisoformat(a[1]) if a[1] else None
+    out = X.DATA_DIR / (a[2] or OUT.name)
+    result = run(X.AlpacaData(), start, end)
     X.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, OUT)
-    print(f"Wrote {OUT.name}: {len(result['trades'])} trades")
+    tmp = out.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, out)
+    print(f"Wrote {out.name}: {len(result['trades'])} trades")
