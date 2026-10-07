@@ -1,0 +1,80 @@
+name: Custom run
+
+# Run any model on any date range. Results go to the "Custom run" tab and
+# never overwrite the regular tabs (those keep updating on their own).
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Which model"
+        type: choice
+        default: "Idea lab"
+        options:
+          - "Idea lab"
+          - "RSI models"
+          - "Intraday momentum"
+          - "Swing (long history)"
+          - "Experimental (all groups, minute data)"
+          - "Experimental ladders (daily data)"
+      start_date:
+        description: "Start date (YYYY-MM-DD)"
+        required: true
+        default: "2025-01-01"
+      end_date:
+        description: "End date (YYYY-MM-DD), leave blank for the latest close"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: experimental
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install alpaca-py
+      - name: Run the backtest
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          MODEL: ${{ github.event.inputs.model }}
+          START: ${{ github.event.inputs.start_date }}
+          END: ${{ github.event.inputs.end_date }}
+        run: |
+          case "$MODEL" in
+            "Idea lab")                               python lab_models.py "$START" "$END" backtest_custom.json ;;
+            "RSI models")                             python rsi_models.py "$START" "$END" backtest_custom.json ;;
+            "Intraday momentum")                      python intraday_momentum.py "$START" "$END" backtest_custom.json ;;
+            "Swing (long history)")                   python swing_models.py "$START" "$END" backtest_custom.json ;;
+            "Experimental (all groups, minute data)") python experimental.py "$START" "$END" backtest_custom.json ;;
+            "Experimental ladders (daily data)")      python experimental.py "$START" "$END" backtest_custom.json daily ;;
+            *) echo "::error::Unknown model: $MODEL"; exit 1 ;;
+          esac
+          python - <<'PY'
+          import json, os
+          p = "data/backtest_custom.json"
+          d = json.load(open(p))
+          end = os.environ.get("END") or "the latest close"
+          d["meta"]["run_label"] = f"Custom run: {os.environ['MODEL']}, {os.environ['START']} to {end}"
+          json.dump(d, open(p, "w"), separators=(",", ":"))
+          print(d["meta"]["run_label"])
+          PY
+      - name: Save results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add data/backtest_custom.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Custom run: ${{ github.event.inputs.model }} ${{ github.event.inputs.start_date }} to ${{ github.event.inputs.end_date || 'latest' }}"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
+          exit 1
