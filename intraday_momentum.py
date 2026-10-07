@@ -26,7 +26,7 @@ Runs on 30-minute bars, so five years takes seconds. Priced like the other
 3x pages: real ETF price at 3:30, exit at 3x the SPY / QQQ move, $0.005 per
 share each way.
 
-    python intraday_momentum.py [START_DATE]       (default 2021-10-01)
+    python intraday_momentum.py [START] [END] [OUTPUT FILE]   (default 2021-10-01 to the latest close)
 """
 
 import json
@@ -144,8 +144,12 @@ def run(data, start, end=None):
 
 
 if __name__ == "__main__":
-    start = dt.date.fromisoformat(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else START)
-    result = run(Bars30(), start)
+    # python intraday_momentum.py [START] [END] [OUTPUT FILE]   (blank END = latest close)
+    a = sys.argv[1:] + ["", "", ""]
+    start = dt.date.fromisoformat(a[0] or START)
+    end = dt.date.fromisoformat(a[1]) if a[1] else None
+    out = X.DATA_DIR / (a[2] or OUT.name)
+    result = run(Bars30(), start, end)
     X.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, OUT)
-    print(f"Wrote {OUT.name}: {len(result['trades'])} trades over {result['meta']['trading_days']} days")
+    tmp = out.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, out)
+    print(f"Wrote {out.name}: {len(result['trades'])} trades over {result['meta']['trading_days']} days")
