@@ -55,7 +55,7 @@ Multi-day ideas: tiers set the longest hold: Conservative 3 days, Moderate 5, Ag
 Pricing like the other 3x pages; multi-day trades use real 3x ETF closing prices,
 so the ETFs' multi-day drift is included. $0.005 per share each way.
 
-    python lab_models.py [START_DATE]       (default 2026-01-01)
+    python lab_models.py [START] [END] [OUTPUT FILE]     (default 2026-01-01 to the latest close)
 """
 
 import json
@@ -396,8 +396,12 @@ class LabData(X.AlpacaData):
 
 
 if __name__ == "__main__":
-    start = dt.date.fromisoformat(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else START)
-    result = run(LabData(), start)
+    # python lab_models.py [START] [END] [OUTPUT FILE]   (blank END = latest close)
+    a = sys.argv[1:] + ["", "", ""]
+    start = dt.date.fromisoformat(a[0] or START)
+    end = dt.date.fromisoformat(a[1]) if a[1] else None
+    out = X.DATA_DIR / (a[2] or OUT.name)
+    result = run(LabData(), start, end)
     X.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, OUT)
-    print(f"Wrote {OUT.name}: {len(result['trades'])} trades")
+    tmp = out.with_suffix(".tmp"); tmp.write_text(json.dumps(result, separators=(",", ":"))); os.replace(tmp, out)
+    print(f"Wrote {out.name}: {len(result['trades'])} trades")
