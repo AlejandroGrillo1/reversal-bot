@@ -30,6 +30,10 @@ Groups (each on SPY and QQQ, three tiers each)
   RSI Reversal 80/20 : exactly RSI Reversal, but with stricter extremes: under 20 then
                  back above 20 -> bull ETF; over 80 then back below 80 -> bear ETF.
                  Fewer, more stretched signals.
+  RSI Into extreme : the early version of RSI Reversal. Buys the moment RSI first
+                 crosses INTO an extreme instead of waiting for the rebound:
+                 drops below 30 -> bull ETF; rises above 70 -> bear ETF.
+                 Better prices when the turn is near, but it can buy into a falling knife.
   Random control : the yardstick. Enters at random minutes between 9:35 and 1:00
                  and flips a coin for direction, with the same tiers, exits and limits.
                  An RSI group only has a real signal if it clearly beats this.
@@ -39,8 +43,8 @@ Groups (each on SPY and QQQ, three tiers each)
 Rules for every model
   New trades from 9:35 AM to 1:00 PM ET. One trade open at a time, at most 5 per day.
   Targets on the stock's own move, stop the same size as the target (1:1):
-      SPY / QQQ : Conservative ±0.17%, Moderate ±0.30%, Aggressive ±0.44%
-      MU        : Conservative ±0.34%, Moderate ±0.60%, Aggressive ±0.87%
+      SPY / QQQ : Conservative ±0.11%, Moderate ±0.20%, Aggressive ±0.29%
+      MU        : Conservative ±0.23%, Moderate ±0.40%, Aggressive ±0.58%
   (MU's are 2x SPY / QQQ's. At 1:1, random entries win about half the time.)
   A trade that hasn't hit its target or stop by 3:30 PM is sold then if it's
   in the green; otherwise it holds (target and stop still live) until 3:55.
@@ -71,9 +75,9 @@ STAGGER_COUNT = 3                 # RSI Third touch trades the Nth extreme in a 
 ORD = {2: "2nd", 3: "3rd"}.get(STAGGER_COUNT, f"{STAGGER_COUNT}th")
 # Target % of the stock's own move, per ticker. STOP_RATIO 1.0 = stop as big as the target (1:1).
 TIERS = {
-    "SPY": {"Conservative": 0.17, "Moderate": 0.30, "Aggressive": 0.44},
-    "QQQ": {"Conservative": 0.17, "Moderate": 0.30, "Aggressive": 0.44},
-    "MU":  {"Conservative": 0.34, "Moderate": 0.60, "Aggressive": 0.87},
+    "SPY": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29},
+    "QQQ": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29},
+    "MU":  {"Conservative": 0.23, "Moderate": 0.40, "Aggressive": 0.58},
 }
 STOP_RATIO = 1.0
 RANDOM_CANDIDATES = 8             # random entry times offered to the Random control each day
@@ -103,6 +107,8 @@ GROUPS = [
      "desc": f"Same as RSI Reversal on a {RSI_FAST}-period RSI · back above 30 → bull ETF · back below 70 → bear ETF"},
     {"key": "rsi_rev8020", "name": "RSI Reversal 80/20", "color": "#A35D5D", "bull": "up20", "bear": "down80",
      "desc": "Back above 20 → bull ETF · back below 80 → bear ETF · new trades 9:35–1:00, max 5 a day"},
+    {"key": "rsi_into", "name": "RSI Into extreme", "color": "#B8875A", "bull": "into30", "bear": "into70",
+     "desc": "Buys as RSI first drops below 30 → bull ETF · first rises above 70 → bear ETF · no waiting for the rebound"},
     {"key": "rsi_random", "name": "Random control", "color": "#9A9083", "bull": "rand_up", "bear": "rand_down",
      "desc": "Random entry times and a coin flip for direction · same tiers and exits · the yardstick to beat"},
 ]
@@ -126,7 +132,7 @@ def wilder_rsi(closes, n=RSI_LEN):
 
 def signals(times, rsi):
     """{'up30': [minute, ...], 'down70': [...], 'up60': [...], 'down40': [...]} by the minute the signal closed."""
-    sig = {k: [] for k in ("up30", "down70", "up60", "down40", "up20", "down80",
+    sig = {k: [] for k in ("up30", "down70", "up60", "down40", "up20", "down80", "into30", "into70",
                            "clean_up30", "clean_down70", "third_up30", "third_down70")}
     extremes = []                                    # ("B" or "T", minute), counted from 9:30
     for i in range(1, len(times)):
@@ -143,6 +149,8 @@ def signals(times, rsi):
         if a > 40 >= b: sig["down40"].append(t)
         if a < 20 <= b: sig["up20"].append(t)
         if a > 80 >= b: sig["down80"].append(t)
+        if a >= 30 > b: sig["into30"].append(t)          # just dropped into oversold
+        if a <= 70 < b: sig["into70"].append(t)          # just rose into overbought
     kinds = [k for k, _ in extremes]
     for i, (k, t) in enumerate(extremes):
         if t < FIRST_SIGNAL:
