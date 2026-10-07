@@ -60,6 +60,7 @@
   .errors code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .pill.warn { background: var(--loss-bg); color: var(--loss); }
   .pill.warn .dot { background: var(--loss); }
+  body.nodata .hero, body.nodata main > section { display: none; }   /* tab with no results file: show only the banner */
   .dc-controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 16px; margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }
   .dc-controls label { display: flex; align-items: center; gap: 8px; }
   .dc-controls select { font: inherit; color: var(--ink); background: var(--sand); border: 0; border-radius: 999px; padding: 6px 12px; max-width: 100%; }
@@ -499,6 +500,7 @@ async function load() {
   banner.classList.add("hidden"); banner.innerHTML = "";
   document.getElementById("footer").textContent = FOOTER_TEXT;
   raw = { trades: [], days: [], errors: [] }; selected = null;
+  document.body.classList.remove("nodata");
   applyGroups(null);
   document.getElementById("dcSec").classList.add("hidden");
   if (DEMO) {
@@ -518,8 +520,10 @@ async function load() {
       if (SRC !== "live") {
         banner.classList.remove("hidden");
         const pick = { experimental: "this year", exp5y: "last 5 years", expdown: "2022-23 round trip", rsi: "RSI models" }[SRC];
+        document.body.classList.add("nodata");
         banner.innerHTML = isExp(SRC)
-          ? `<b>No results for this tab yet.</b> On GitHub, go to Actions → Experimental → Run workflow, choose “${pick}”, and run it. The model rules below are placeholders until then.`
+          ? `<b>No results for this tab yet.</b> Your site doesn't have <code>${SOURCES[SRC].file}</code>. On GitHub, go to Actions → Experimental → Run workflow, choose “${pick}”, and run it. ` +
+            `If a run already finished, open it: a red X means it failed (paste the error to Claude); a green check means refresh this page in a minute.`
           : "<b>No backtest yet.</b> On GitHub, go to Actions → Backtest → Run workflow. Results show up here when it finishes.";
       }
       raw = { trades: [], days: [], errors: [] };   // clear out the previous page's numbers
