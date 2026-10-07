@@ -60,6 +60,10 @@
   .errors code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .pill.warn { background: var(--loss-bg); color: var(--loss); }
   .pill.warn .dot { background: var(--loss); }
+  td.exits { min-width: 170px; }
+  td.exits .xbar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: var(--sand); margin-bottom: 4px; }
+  td.exits .xbar i { display: block; height: 100%; }
+  td.exits small { display: block; font-size: 11px; color: var(--ink-2); white-space: nowrap; }
   body.nodata .hero, body.nodata main > section { display: none; }   /* tab with no results file: show only the banner */
   .dc-controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 16px; margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }
   .dc-controls label { display: flex; align-items: center; gap: 8px; }
@@ -348,6 +352,15 @@ const dashStyle = d => !d.length ? "solid" : d[0] > 3 ? "dashed" : "dotted";
 let raw = { trades: [], days: [] }, charts = {}, selected = null;
 const openGroups = new Set();
 // Scorecard sorting: click a column title to sort by it, click again to flip the order
+// How trades ended: target / stop / 2:30 green / end of day / anything else
+const EXIT_KINDS = [["target", "Target", "var(--gain)"], ["stop", "Stop", "var(--loss)"], ["green", "2:30 green", "#8FB59A"], ["eod", "End of day", "var(--muted)"], ["other", "Other", "var(--sand-2)"]];
+const exitKind = r => { r = (r || "").toLowerCase();
+  return r.includes("target") ? "target" : r.includes("stop") ? "stop" : r.includes("green") ? "green" : (r.includes("end of day") || r.includes("close")) ? "eod" : "other"; };
+const exitMix = ts => { const c = { target: 0, stop: 0, green: 0, eod: 0, other: 0 }; ts.forEach(t => c[exitKind(t.reason)]++); return c; };
+const exitCell = (c, n) => !n ? `<td class="hint">–</td>` :
+  `<td class="exits" title="${EXIT_KINDS.filter(([k]) => c[k]).map(([k, lab]) => `${lab}: ${c[k]} (${Math.round(c[k] / n * 100)}%)`).join(" · ")}">` +
+  `<span class="xbar">${EXIT_KINDS.filter(([k]) => c[k]).map(([k, , col]) => `<i style="width:${c[k] / n * 100}%;background:${col}"></i>`).join("")}</span>` +
+  `<small>${EXIT_KINDS.filter(([k]) => c[k] && k !== "other").map(([k, lab]) => `${k === "target" ? "<b>" : ""}${lab.replace("End of day", "EOD")} ${c[k] / n < 0.005 ? "<1" : Math.round(c[k] / n * 100)}%${k === "target" ? "</b>" : ""}`).join(" · ")}</small></td>`;
 const SORT_COLS = {
   group: { label: "Group", get: r => MODES.indexOf(r.mode) * 10 + TICKERS.indexOf(r.tk), dir: 1 },
   model: { label: "Model", get: r => MODEL_KEYS.indexOf(r.m), dir: 1 },
@@ -357,6 +370,7 @@ const SORT_COLS = {
   avgW: { label: "Avg win", get: r => r.avgW, dir: -1 },
   avgL: { label: "Avg loss", get: r => r.avgL, dir: -1 },
   p: { label: "Total P&L", get: r => r.n ? r.p : null, dir: -1 },
+  tgt: { label: "How trades ended", get: r => r.tgt, dir: -1 },
   op: { label: "Open P&L", get: r => r.on ? r.opct : null, dir: -1 },
   bigW: { label: "Biggest win", get: r => r.bigW, dir: -1 },
   bigL: { label: "Biggest loss", get: r => r.bigL, dir: -1 },
@@ -724,7 +738,7 @@ function render() {
     return `<div class="grp ${openGroups.has(mode) ? "open" : ""}" data-mode="${mode}">
       <button class="grp-head" aria-expanded="${openGroups.has(mode)}">
         <span class="chev">▸</span>
-        <div class="grp-name"><b><i class="sw" style="background:${MODE_COLOR[mode]}"></i>${MODE_NAME[mode]}</b><small>${modeDesc(mode)} · ${n ? `${n} of ${slots} traded` : "no trades"}</small></div>
+        <div class="grp-name"><b><i class="sw" style="background:${MODE_COLOR[mode]}"></i>${MODE_NAME[mode]}</b><small>${modeDesc(mode)} · ${n ? `${new Set(g.map(t => t.ticker + "|" + t.model)).size} of ${slots} traded${n > slots ? ` · ${n} trades` : ""}` : "no trades"}</small></div>
         ${kp("Avg P&L / trade", usd(avgP), cls(avgP), "k1")}
         ${kp("Avg return", pct(avgR), cls(avgR), "k2")}
         ${kp("Avg ETF move your way", moves.length ? pct2(avgM) : "–", moves.length ? cls(avgM) : "", "k3")}
@@ -792,7 +806,8 @@ function render() {
     const ot = ts.filter(t => t.open_at_end), op = sum(ot.map(t => t.pnl_usd));   // positions still held when the run ended
     rowsSc.push({ tk, mode, m, d, on: ot.length, op, opct: ot.length ? op / (100 * ot.length) : null, n: ts.length, wr: ts.length ? w.length / ts.length : -1, p: sum(ts.map(t => t.pnl_usd)),
       avgW: w.length ? mean(w.map(t => t.pnl_usd)) : null, avgL: l.length ? mean(l.map(t => t.pnl_usd)) : null,
-      bigW: w.length ? Math.max(...w.map(t => t.pnl_usd)) : null, bigL: l.length ? Math.min(...l.map(t => t.pnl_usd)) : null, hold: ts.length ? mean(ts.map(held)) : null });
+      bigW: w.length ? Math.max(...w.map(t => t.pnl_usd)) : null, bigL: l.length ? Math.min(...l.map(t => t.pnl_usd)) : null, hold: ts.length ? mean(ts.map(held)) : null,
+      ex: exitMix(ts), tgt: ts.length ? exitMix(ts).target / ts.length : null });
   })));
   const col = SORT_COLS[sortKey];
   rowsSc.sort((a, b) => {
@@ -807,11 +822,11 @@ function render() {
   const th = (key, extra = "") => `<th class="sortable ${extra} ${sortKey === key ? "sorted" : ""}" data-sort="${key}" aria-sort="${sortKey === key ? (sortDir > 0 ? "ascending" : "descending") : "none"}">${SORT_COLS[key].label.replace("&", "&amp;")}<span class="arr">${sortKey === key ? (sortDir > 0 ? "▲" : "▼") : "↕"}</span></th>`;
   const cellUsd = (v, c) => v == null ? `<td class="num">–</td>` : `<td class="num ${c}">${usd(v)}</td>`;
   document.getElementById("scorecard").innerHTML =
-    `<tr><th>#</th>${th("group")}${th("model")}${th("n", "num")}${th("hold", "num")}${th("wr", "num")}${th("avgW", "num")}${th("avgL", "num")}${th("p", "num")}${th("op", "num")}${th("bigW", "num")}${th("bigL", "num")}<th>Exit rule</th></tr>` +
+    `<tr><th>#</th>${th("group")}${th("model")}${th("n", "num")}${th("hold", "num")}${th("wr", "num")}${th("avgW", "num")}${th("avgL", "num")}${th("p", "num")}${th("tgt")}${th("op", "num")}${th("bigW", "num")}${th("bigL", "num")}<th>Exit rule</th></tr>` +
     rowsShown.map((r, i) => `<tr><td>${r.n ? i + 1 : "–"}</td><td><b>${r.tk}</b> ${modeTag(r.mode)}</td><td>${r.m}</td><td class="num">${r.n}</td><td class="num">${dur(r.hold)}</td>
       <td class="num">${r.n ? Math.round(r.wr * 100) + "%" : "–"}<span class="bar"><span style="width:${r.n ? Math.round(r.wr * 100) : 0}%"></span></span></td>
       ${cellUsd(r.avgW, "pos")}${cellUsd(r.avgL, "neg")}
-      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td><td class="num ${r.on ? cls(r.op) : ""}">${r.on ? `${pct(r.opct)}<small class="hint" style="display:block">${usd(r.op)} on ${r.on} open</small>` : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}<td class="hint">${r.d}</td></tr>`).join("");
+      <td class="num ${cls(r.p)}">${r.n ? usd(r.p) : "–"}</td>${exitCell(r.ex, r.n)}<td class="num ${r.on ? cls(r.op) : ""}">${r.on ? `${pct(r.opct)}<small class="hint" style="display:block">${usd(r.op)} on ${r.on} open</small>` : "–"}</td>${cellUsd(r.bigW, "pos")}${cellUsd(r.bigL, "neg")}<td class="hint">${r.d}</td></tr>`).join("");
 
   // Log
   const order = x => x.date + x.entry_time + x.ticker + modeOf(x) + x.model;
