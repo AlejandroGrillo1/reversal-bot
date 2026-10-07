@@ -3,8 +3,10 @@ RSI MODELS  (3x leveraged, signals on SPY / QQQ / MU)
 =====================================================
 Writes data/backtest_rsi.json for the dashboard tab index.html?data=rsi.
 
-RSI is 14-period Wilder RSI on 1-minute closes of SPY / QQQ, warmed up with the
-previous afternoon so it is ready at 9:35. A signal is checked when each minute
+RSI is 14-period Wilder RSI on 1-minute closes, warmed up with the previous
+afternoon so it is ready at 9:35. The overnight gap is taken out of the warm-up
+(the afternoon is shifted to end at today's open), so a gap doesn't look like
+one giant 1-minute move. A signal is checked when each minute
 closes and the trade is bought at the next minute's opening price.
 
 Groups (each on SPY and QQQ, three tiers each)
@@ -29,8 +31,10 @@ Groups (each on SPY and QQQ, three tiers each)
 
 Rules for every model
   New trades from 9:35 to 12:00 ET. One trade open at a time, at most 5 per day.
-  Targets on the SPY / QQQ move: Conservative +0.30%, Moderate +0.55%,
-  Aggressive +0.80%; stop at half the target (1:2).
+  Targets on the stock's own move, stop at half the target (1:2):
+      SPY / QQQ : Conservative +0.25%, Moderate +0.45%, Aggressive +0.65%
+      MU        : Conservative +0.50%, Moderate +0.90%, Aggressive +1.30%
+  (MU's targets are 2x SPY / QQQ's.)
   A trade that hasn't hit its target or stop by 2:30 PM is sold then if it's
   in the green; otherwise it holds (target and stop still live) until 3:55.
   Priced like the other 3x pages: real ETF price at entry, exit at 3x the
@@ -57,14 +61,21 @@ GREEN_CHECK, EOD_TIME = "14:30", "15:55"         # sell at 2:30 if green, else h
 MAX_TRADES = 5
 STAGGER_COUNT = 3                 # RSI Third touch trades the Nth extreme in a row
 ORD = {2: "2nd", 3: "3rd"}.get(STAGGER_COUNT, f"{STAGGER_COUNT}th")
-TIERS = {"Conservative": 0.30, "Moderate": 0.55, "Aggressive": 0.80}   # % SPY/QQQ move; stop = half
+# Target % of the stock's own move, per ticker; the stop is always half the target.
+TIERS = {
+    "SPY": {"Conservative": 0.25, "Moderate": 0.45, "Aggressive": 0.65},
+    "QQQ": {"Conservative": 0.25, "Moderate": 0.45, "Aggressive": 0.65},
+    "MU":  {"Conservative": 0.50, "Moderate": 0.90, "Aggressive": 1.30},
+}
+TIER_NAMES = list(TIERS["SPY"])
 LEV, SLIP, TRADE = X.LEV, X.SLIPPAGE, X.TRADE_DOLLARS
 # ticker -> its 3x bull / bear ETFs. None = no 3x ETF exists, so it's priced as a 3x estimate.
 PAIRS = {**X.PAIRS, "MU": {"bull": None, "bear": None}}
 MU_COST = 0.0003                  # round-trip cost for the 3x estimate (0.03% of the trade)
 OUT = X.DATA_DIR / "backtest_rsi.json"
 
-MODELS = [{"key": k, "rule": f"SPY/QQQ/MU +{v:.2f}% / −{v / 2:.3g}% (3× ≈ +{v * LEV:.2f}%)"} for k, v in TIERS.items()]
+MODELS = [{"key": k, "rule": f"SPY/QQQ +{TIERS['SPY'][k]:.2f}% · MU +{TIERS['MU'][k]:.2f}% · stop at half (3× ≈ +{TIERS['SPY'][k] * LEV:.2f}% / +{TIERS['MU'][k] * LEV:.2f}%)"}
+          for k in TIER_NAMES]
 GROUPS = [
     {"key": "rsi_rev", "name": "RSI Reversal", "color": "#2B2722", "bull": "up30", "bear": "down70",
      "desc": "Back above 30 → bull ETF · back below 70 → bear ETF · new trades 9:35–12:00, max 5 a day"},
@@ -168,6 +179,9 @@ class Engine:
                 continue
             self.bars.setdefault(day, {})[tk] = minute_closes(ub)
             warm = self.carry[tk]
+            if warm:                                   # take the overnight gap out of the warm-up
+                shift = ub[times[0]][0] / warm[-1]
+                warm = [c * shift for c in warm]
             closes = warm + [ub[t][3] for t in times]
             self.carry[tk] = [ub[t][3] for t in times][-60:]
             sig = signals(times, wilder_rsi(closes)[len(warm):])
@@ -177,7 +191,7 @@ class Engine:
                 events = sorted([(t, True) for t in (sig[g["bull"]] if g["bull"] else [])] +
                                 [(t, False) for t in (sig[g["bear"]] if g["bear"] else [])])
                 counts = []
-                for model, tp in TIERS.items():
+                for model, tp in TIERS[tk].items():
                     n, free_at, res = 0, "00:00", []
                     for t_sig, bull in events:
                         if n >= MAX_TRADES or t_sig < free_at:
@@ -191,7 +205,7 @@ class Engine:
                     counts.append(res)
                 best = max(counts, key=len)
                 if any(counts):
-                    tally = ", ".join(f"{model} {len(c)}" for model, c in zip(TIERS, counts))
+                    tally = ", ".join(f"{model} {len(c)}" for model, c in zip(TIER_NAMES, counts))
                     note = f"Trades by model: {tally}"
                 else:
                     note = "No RSI signal between 9:35 and 12:00"
@@ -260,7 +274,7 @@ def run(data, start):
     meta = {
         "generated": dt.datetime.now(X.ET).strftime("%Y-%m-%d %H:%M ET"),
         "start": days[0], "end": days[-1], "trading_days": len(days), "feed": data.feed,
-        "note": (f"{RSI_LEN}-period RSI on 1-minute SPY/QQQ closes ({RSI_FAST}-period for RSI Reversal 9), warmed up with the prior afternoon. "
+        "note": (f"{RSI_LEN}-period RSI on 1-minute SPY/QQQ closes ({RSI_FAST}-period for RSI Reversal 9), warmed up with the prior afternoon (overnight gap removed). "
                  f"New trades 9:35–12:00, bought at the next minute's open; one trade at a time, max {MAX_TRADES} per model per day. "
                  f"No target or stop by 2:30 PM: sold then if green, otherwise held to 3:55. {LEV}x ETFs, ${TRADE:.0f} per trade, ${SLIP} per share each way. "
                  f"MU has no 3x ETF, so MU trades are a 3x estimate from Micron's own move, {MU_COST * 100:.2f}% round-trip cost"),
