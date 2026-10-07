@@ -9,8 +9,9 @@ on:
       which:
         description: "Which backtest to run"
         type: choice
-        default: "this year"
+        default: "this year + RSI models"
         options:
+          - "this year + RSI models"
           - "this year"
           - "RSI models"
           - "last 5 years"
@@ -40,10 +41,10 @@ jobs:
           ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
           WHICH: ${{ github.event.inputs.which || 'daily' }}
         run: |
-          if [ "$WHICH" = "this year" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
+          if [ "$WHICH" = "this year" ] || [ "$WHICH" = "this year + RSI models" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
             python experimental.py 2026-01-01 "" backtest_experimental.json
           fi
-          if [ "$WHICH" = "RSI models" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
+          if [ "$WHICH" = "RSI models" ] || [ "$WHICH" = "this year + RSI models" ] || [ "$WHICH" = "daily" ] || [ "$WHICH" = "everything" ]; then
             python rsi_models.py 2026-01-01
           fi
           if [ "$WHICH" = "last 5 years" ] || [ "$WHICH" = "everything" ]; then
