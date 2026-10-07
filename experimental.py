@@ -337,7 +337,7 @@ def run(data, start, end=None, daily=False):
     days = [d for d, _ in closes.get("SPY", []) if start.isoformat() <= d <= end.isoformat()]
     print(f"{len(days)} trading days: {days[0]} .. {days[-1]}")
     eng = Engine()
-    first_px, last_px, last_bars = {}, {}, None
+    first_px, last_px, last_bars, day_bars = {}, {}, None, {}
     if daily:
         symbols = TICKERS + [p["bull"] for p in PAIRS.values()]
         all_daily = data.daily_bars(symbols, start, end)
@@ -354,6 +354,8 @@ def run(data, start, end=None, daily=False):
                 prev_close[tk] = prior[-1] if prior else None
             if not daily:
                 eng.intraday(d, bars[d], prev_close)
+                from rsi_models import minute_closes
+                day_bars[d] = {tk: minute_closes(bars[d].get(tk, {})) for tk in TICKERS}
             eng.dips(d, bars[d], high52)
             for tk, pair in PAIRS.items():          # for the buy-and-hold comparison
                 for sym, t in ((tk, None), (pair["bull"], None)):
@@ -383,12 +385,15 @@ def run(data, start, end=None, daily=False):
         "start": days[0], "end": last_day, "trading_days": len(days), "feed": data.feed,
         "note": f"{LEV}x ETFs, ${TRADE_DOLLARS:.0f} per buy, ${SLIPPAGE} per share each way for the spread. "
                 f"Buy and hold over this period: {bh}. " +
-                ("Ladders only, using daily closes (the day-trading groups need minute data)." if daily else eng.edge_note()),
+                ("Ladders only, using daily closes (the day-trading groups need minute data)" if daily else eng.edge_note()),
         "groups": [{k: g[k] for k in ("key", "name", "desc", "color", "models")} for g in GROUPS
                    if not (daily and g["kind"] == "intraday")],
         "ladder_stats": ladder_stats, "buy_hold": buy_hold,
     }
-    return {"meta": meta, "trades": eng.trades, "days": eng.days, "errors": []}
+    out = {"meta": meta, "trades": eng.trades, "days": eng.days, "errors": []}
+    if day_bars:
+        out["bars"] = day_bars
+    return out
 
 
 if __name__ == "__main__":
