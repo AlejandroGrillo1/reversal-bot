@@ -1,0 +1,45 @@
+name: Idea lab
+
+on:
+  schedule:
+    - cron: "50 20 * * 1-5"   # 4:50 PM New York time in summer (EDT)
+    - cron: "50 21 * * 1-5"   # 4:50 PM New York time in winter (EST)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: experimental        # same queue as the other backtests so pushes never collide
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the files are there
+        run: |
+          for f in lab_models.py rsi_models.py experimental.py; do
+            if [ ! -f "$f" ]; then echo "::error::$f is missing from the repo. Upload it to the main folder."; exit 1; fi
+          done
+      - run: pip install alpaca-py
+      - name: Run Idea lab backtest (this year)
+        run: python lab_models.py 2026-01-01
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+      - name: Save results
+        run: |
+          ls -la data/backtest_lab.json || { echo "::error::The backtest finished but data/backtest_lab.json wasn't created."; exit 1; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add data/backtest_lab.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Idea lab: update"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 10; done
+          exit 1
