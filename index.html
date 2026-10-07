@@ -247,7 +247,7 @@
     <div class="sec-head"><h2>Day chart</h2><span class="hint">1-minute price · pick a model to draw its trades</span></div>
     <div class="card dc-controls">
       <label>Day <select id="dcDay"></select></label>
-      <label>Ticker <select id="dcTk"><option>SPY</option><option>QQQ</option></select></label>
+      <label>Ticker <select id="dcTk"></select></label>
       <label>Model <select id="dcModel"></select></label>
       <span class="hint" id="dcCount"></span>
     </div>
@@ -286,7 +286,7 @@ const FOOTER_TEXT = document.getElementById("footer").textContent;
 const MODELS = { Conservative: "ETF +0.10% / −0.05% · option −10%", Moderate: "ETF +0.25% / −0.125% · option −20%", Aggressive: "ETF +0.40% / −0.20% · option −35%" };
 const OPT_STOP = { Conservative: .10, Moderate: .20, Aggressive: .35 };
 let MODEL_KEYS = Object.keys(MODELS);
-const TICKERS = ["SPY", "QQQ"];
+let TICKERS = ["SPY", "QQQ"];   // replaced by the results file's own list when it has one
 let MODES = ["signal", "staggered", "retrace25", "retrace35", "always", "longonly"];
 let MODE_NAME = { signal: "Signal", retrace35: "Retrace 35%", retrace25: "Retrace 25%", staggered: "Staggered", always: "Always", longonly: "Long only" };
 let MODE_DESC = { signal: "VWAP cross · 5m hold", retrace35: "35% pullback · 5m hold", retrace25: "25% pullback · 5m hold", staggered: "VWAP cross · 5 / 12 / 20m hold", always: "Every day at 7:28 · 5m hold", longonly: "Calls only, down mornings at 7:28 · 5m hold" };
@@ -313,7 +313,8 @@ const ruleOf = (mode, m) => (MODEL_RULE[mode] || {})[m] || "";
 const ruleCol = (mode, m) => CUSTOM ? ruleOf(mode, m) : `${ruleOf(mode, m)} · ${holdRule(mode, m)}`;
 const dashFor = (mode, m) => [[], [6, 4], [2, 3]][modelsOf(mode).indexOf(m)] || [];
 const modeTag = mode => `<span class="mode" style="background:${MODE_COLOR[mode]}22;color:${MODE_COLOR[mode]}">${MODE_NAME[mode]}</span>`;
-function applyGroups(groups) {
+function applyGroups(groups, tickers) {
+  TICKERS = tickers && tickers.length ? [...tickers] : ["SPY", "QQQ"];
   CUSTOM = !!(groups && groups.length);
   if (CUSTOM) {
     MODES = groups.map(g => g.key);
@@ -341,7 +342,7 @@ function applyGroups(groups) {
 }
 const holdRule = (mode, m) => noHold(mode) ? "no hold exit" : `${HOLD[mode][m]}m hold`;
 const TK_COLOR = { SPY: "#2B2722", QQQ: "#B8875A" };
-const TK_DASH = { SPY: [], QQQ: [6, 4] };
+const TK_DASH = { SPY: [], QQQ: [6, 4], MU: [2, 3] };
 const dashStyle = d => !d.length ? "solid" : d[0] > 3 ? "dashed" : "dotted";
 let raw = { trades: [], days: [] }, charts = {}, selected = null;
 const openGroups = new Set();
@@ -382,7 +383,7 @@ const short = d => new Date(d + "T12:00").toLocaleDateString(undefined, { month:
 // Click a choice to show only it; click more to add them; click a selected one to drop it; "All" resets the row.
 const FILTER_ROWS = [
   { key: "groups", label: "Group", all: "All", opts: () => MODES, name: m => MODE_NAME[m], swatch: m => MODE_COLOR[m] },
-  { key: "tickers", label: "Ticker", all: "Both", opts: () => TICKERS, name: x => x },
+  { key: "tickers", label: "Ticker", get all() { return TICKERS.length > 2 ? "All" : "Both"; }, opts: () => TICKERS, name: x => x },
   { key: "models", label: "Model", all: "All", opts: () => MODEL_KEYS, name: x => x },
 ];
 const newFilter = () => ({ groups: new Set(MODES), tickers: new Set(TICKERS), models: new Set(MODEL_KEYS) });
@@ -527,7 +528,7 @@ async function load() {
       return;
     }
   }
-  if (raw.meta && raw.meta.groups) applyGroups(raw.meta.groups);
+  if (raw.meta && raw.meta.groups) applyGroups(raw.meta.groups, raw.meta.tickers);
   if (SRC !== "live" && raw.meta) {
     const m = raw.meta;
     banner.classList.remove("hidden");
@@ -603,6 +604,8 @@ function renderDayChart() {
   if (!DC.day || !bars[DC.day]) DC.day = days[0];
   const daySel = document.getElementById("dcDay"), tkSel = document.getElementById("dcTk"), mSel = document.getElementById("dcModel");
   daySel.innerHTML = days.map(d => `<option value="${d}" ${d === DC.day ? "selected" : ""}>${short(d)}</option>`).join("");
+  const tks = TICKERS.filter(tk => Object.values(bars).some(b => b[tk])), curTk = tks.includes(tkSel.value) ? tkSel.value : tks[0];
+  tkSel.innerHTML = tks.map(tk => `<option ${tk === curTk ? "selected" : ""}>${tk}</option>`).join("");
   const opts = MODES.flatMap(md => modelsOf(md).map(m => [`${md}|${m}`, `${MODE_NAME[md]} · ${m}`]));
   const cur = opts.some(([v]) => v === mSel.value) ? mSel.value : (opts[0] || [""])[0];
   mSel.innerHTML = opts.map(([v, l]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${l}</option>`).join("");
@@ -735,7 +738,7 @@ function render() {
     : "";
   const latestErr = errors.filter(e => e.date === latest).length, pill = document.getElementById("statusPill");
   pill.className = "pill" + (latestErr ? " warn" : "");
-  pill.innerHTML = `<span class="dot"></span>` + (latestErr ? `${latestErr} error${latestErr > 1 ? "s" : ""} in latest session` : "Paper trading · SPY · QQQ");
+  pill.innerHTML = `<span class="dot"></span>` + (latestErr ? `${latestErr} error${latestErr > 1 ? "s" : ""} in latest session` : "Paper trading · " + TICKERS.join(" · "));
   // Day notes, organized by group (rows) and ticker (columns)
   const dayNotes = days.filter(d => d.date === selected);
   const noteFor = (mode, tk) => { const d = dayNotes.find(x => modeOf(x) === mode && x.ticker === tk); return d ? d.note : "–"; };
@@ -754,7 +757,7 @@ function render() {
   MODES.filter(m => FP.groups.has(m)).forEach(mode => pickedTk.forEach(tk => {
     const parts = pickedFor(mode).map(m => cum(tk, mode, m));
     if (!parts.length) return;
-    avgSeries.push({ label: `${MODE_NAME[mode]} ${tk}`, color: MODE_COLOR[mode], dash: TK_DASH[tk], width: 2.2,
+    avgSeries.push({ label: `${MODE_NAME[mode]} ${tk}`, color: MODE_COLOR[mode], dash: TK_DASH[tk] || [], width: 2.2,
       data: tradedDays.map((_, i) => +mean(parts.map(p => p[i])).toFixed(2)) });
   }));
   makeChart("chartAvg", "legendAvg", labels, avgSeries);
