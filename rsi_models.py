@@ -88,6 +88,15 @@ PAIRS = {**X.PAIRS, "MU": {"bull": None, "bear": None}}
 MU_COST = 0.0003                  # round-trip cost for the 3x estimate (0.03% of the trade)
 OUT = X.DATA_DIR / "backtest_rsi.json"
 
+# RSI chart settings per group. events: "out" = mark crossings back out of an extreme (top-outs /
+# bottom-outs), "in" = crossings into an extreme, "cross" = crossings of the hi / lo lines (momentum)
+RSI_VIEW = {
+    "rsi_mom": {"series": "r14", "hi": 60, "lo": 40, "events": "cross"},
+    "rsi_rev9": {"series": "r9", "hi": 70, "lo": 30, "events": "out"},
+    "rsi_rev8020": {"series": "r14", "hi": 80, "lo": 20, "events": "out"},
+    "rsi_into": {"series": "r14", "hi": 70, "lo": 30, "events": "in"},
+}
+
 MODELS = [{"key": k, "rule": f"SPY/QQQ ±{TIERS['SPY'][k]:.2f}% · MU ±{TIERS['MU'][k]:.2f}% · 1:1 (3× ≈ ±{TIERS['SPY'][k] * LEV:.2f}% / ±{TIERS['MU'][k] * LEV:.2f}%)"}
           for k in TIER_NAMES]
 GROUPS = [
@@ -184,6 +193,18 @@ def minute_closes(ub):
     return out
 
 
+def by_minute(times, values):
+    """Spread values (one per bar time) over the 390 minutes from 9:30, one decimal, gaps carry forward."""
+    vals = dict(zip(times, values))
+    out, last = [], None
+    for i in range(390):
+        t = f"{9 + (30 + i) // 60:02d}:{(30 + i) % 60:02d}"
+        if vals.get(t) is not None:
+            last = round(vals[t], 1)
+        out.append(last)
+    return out
+
+
 def next_minute(t, times):
     later = [x for x in times if x > t]
     return later[0] if later else None
@@ -194,6 +215,7 @@ class Engine:
         self.trades, self.days = [], []
         self.carry = {tk: [] for tk in PAIRS}          # previous afternoon's closes, to warm up RSI
         self.bars = {}                                  # {day: {ticker: [1-minute closes from 9:30]}} for the day chart
+        self.rsi = {}                                   # {day: {ticker: {"r14": [...], "r9": [...]}}} for the RSI chart
 
     def day(self, day, bars):
         for tk, pair in PAIRS.items():
@@ -208,8 +230,10 @@ class Engine:
                 warm = [c * shift for c in warm]
             closes = warm + [ub[t][3] for t in times]
             self.carry[tk] = [ub[t][3] for t in times][-60:]
-            sig = signals(times, wilder_rsi(closes)[len(warm):])
-            fast = signals(times, wilder_rsi(closes, RSI_FAST)[len(warm):])
+            r14, r9 = wilder_rsi(closes)[len(warm):], wilder_rsi(closes, RSI_FAST)[len(warm):]
+            self.rsi.setdefault(day, {})[tk] = {"r14": by_minute(times, r14), "r9": by_minute(times, r9)}
+            sig = signals(times, r14)
+            fast = signals(times, r9)
             sig.update({"r9_" + k: v for k, v in fast.items()})
             # Random control: random minutes in the entry window, coin-flip direction (seeded per day + ticker)
             rng = random.Random(f"{day}|{tk}")
@@ -314,8 +338,10 @@ def run(data, start, end=None):
         "groups": [{k: g[k] for k in ("key", "name", "desc", "color")} | {"models": MODELS} for g in GROUPS],
         "tickers": list(PAIRS),
         "entry_window": [FIRST_SIGNAL, LAST_TIME],          # shaded on the Day chart
+        # which RSI line and levels the RSI chart shows for each group
+        "rsi_view": {g["key"]: RSI_VIEW.get(g["key"], {"series": "r14", "hi": 70, "lo": 30, "events": "out"}) for g in GROUPS},
     }
-    return {"meta": meta, "trades": eng.trades, "days": eng.days, "bars": eng.bars, "errors": []}
+    return {"meta": meta, "trades": eng.trades, "days": eng.days, "bars": eng.bars, "rsi": eng.rsi, "errors": []}
 
 
 if __name__ == "__main__":
