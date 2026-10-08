@@ -704,7 +704,15 @@ function drawRsiChart({ W, L, R, N, narrow, tk, mode, ts }) {
   const wrap = document.getElementById("dcRsiWrap"), svg = document.getElementById("dcRsiSvg"), note = document.getElementById("dcRsiNote");
   const view = raw.meta && raw.meta.rsi_view && raw.meta.rsi_view[mode];
   const day = raw.rsi && raw.rsi[DC.day] && raw.rsi[DC.day][tk];
-  if (!view || !day || !day[view.series]) { wrap.classList.add("hidden"); return; }
+  if (!view || !day || !day[view.series]) {
+    // On the RSI tab, say why the panel is empty instead of hiding it
+    if (SRC === "rsi" && !(raw.rsi && Object.keys(raw.rsi).length)) {
+      wrap.classList.remove("hidden"); svg.setAttribute("viewBox", "0 0 1000 60");
+      svg.innerHTML = `<text x="500" y="34" text-anchor="middle">RSI chart: no RSI values in this results file yet</text>`;
+      note.textContent = "Run Actions → RSI models → Run workflow (with the latest rsi_models.py uploaded), then refresh. The RSI chart appears once that run finishes.";
+    } else wrap.classList.add("hidden");
+    return;
+  }
   wrap.classList.remove("hidden");
   const r = day[view.series], hi = view.hi, lo = view.lo;
   const H = narrow ? 140 : 160, T = 8, B = 20;
