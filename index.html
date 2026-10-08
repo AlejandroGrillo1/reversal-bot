@@ -70,7 +70,9 @@
   .dc-controls select { font: inherit; color: var(--ink); background: var(--sand); border: 0; border-radius: 999px; padding: 6px 12px; max-width: 100%; }
   #dcWrap { padding: 10px 8px 4px; }
   #dcSvg { display: block; width: 100%; height: auto; }
-  #dcSvg text { font-family: var(--sans); font-size: 11px; fill: var(--muted); }
+  #dcSvg text, #dcRsiSvg text { font-family: var(--sans); font-size: 11px; fill: var(--muted); }
+  #dcRsiWrap { padding: 6px 8px 0; }
+  #dcRsiSvg { display: block; width: 100%; height: auto; }
   .dc-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); margin-top: 8px; }
   .dc-legend svg { vertical-align: middle; margin-right: 6px; }
   .day:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -257,6 +259,8 @@
       <span class="hint" id="dcCount"></span>
     </div>
     <div class="card" id="dcWrap"><svg id="dcSvg" viewBox="0 0 1000 360" role="img" aria-label="One-minute price chart with the selected model's trades"></svg></div>
+    <div class="card hidden" id="dcRsiWrap" style="margin-top:8px"><svg id="dcRsiSvg" viewBox="0 0 1000 160" role="img" aria-label="RSI for the same day, with its extreme levels and signals"></svg>
+      <div class="hint" id="dcRsiNote" style="padding:2px 10px 6px"></div></div>
     <div class="dc-legend">
       <span><svg width="28" height="8"><line x1="1" y1="4" x2="27" y2="4" stroke="var(--gain)" stroke-width="2.5"/></svg>Buy (bull ETF), made money</span>
       <span><svg width="28" height="8"><line x1="1" y1="4" x2="27" y2="4" stroke="var(--loss)" stroke-width="2.5"/></svg>Buy, lost money</span>
@@ -691,7 +695,57 @@ function drawDayChart() {
       <circle cx="${x1}" cy="${y1}" r="4" fill="${col}"/><circle cx="${x2}" cy="${y2}" r="4" fill="var(--card)" stroke="${col}" stroke-width="2"/></g>`;
   });
   svg.innerHTML = g;
+  drawRsiChart({ W, L, R, N, narrow, tk, mode, ts });
 }
+
+/* RSI panel under the price chart: the RSI line, its extreme levels, every top-out / bottom-out
+   (numbered when several happen in a row, so "third touch" style setups are visible), and the trades. */
+function drawRsiChart({ W, L, R, N, narrow, tk, mode, ts }) {
+  const wrap = document.getElementById("dcRsiWrap"), svg = document.getElementById("dcRsiSvg"), note = document.getElementById("dcRsiNote");
+  const view = raw.meta && raw.meta.rsi_view && raw.meta.rsi_view[mode];
+  const day = raw.rsi && raw.rsi[DC.day] && raw.rsi[DC.day][tk];
+  if (!view || !day || !day[view.series]) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  const r = day[view.series], hi = view.hi, lo = view.lo;
+  const H = narrow ? 140 : 160, T = 8, B = 20;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const X = i => L + (i / (N - 1)) * (W - L - R), Y = v => T + (100 - v) / 100 * (H - T - B);
+  let g = "";
+  g += `<rect x="${L}" y="${Y(100)}" width="${W - L - R}" height="${Y(hi) - Y(100)}" fill="var(--loss)" opacity="0.07"/>`;
+  g += `<rect x="${L}" y="${Y(lo)}" width="${W - L - R}" height="${Y(0) - Y(lo)}" fill="var(--gain)" opacity="0.08"/>`;
+  [[hi, "var(--loss)"], [lo, "var(--gain)"]].forEach(([v, c]) => {
+    g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-dasharray="4 3" opacity="0.8"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`; });
+  g += `<line x1="${L}" x2="${W - R}" y1="${Y(50)}" y2="${Y(50)}" stroke="var(--line)"/>`;
+  g += `<text x="${L - 8}" y="${Y(100) + 9}" text-anchor="end">100</text><text x="${L - 8}" y="${Y(0)}" text-anchor="end">0</text>`;
+  // trades: a faint vertical line at each entry
+  ts.forEach(t => { const x = X(minOf(t.entry_time)); g += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="${t.pnl_usd > 0 ? "var(--gain)" : "var(--loss)"}" opacity="0.45"/>`; });
+  // RSI line (gaps where RSI isn't ready yet)
+  let path = "", pen = false;
+  r.forEach((v, i) => { if (v == null) { pen = false; return; } path += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; });
+  g += `<path d="${path}" fill="none" stroke="var(--ink-2)" stroke-width="1.3"/>`;
+  // signals: crossings, numbered when the same kind repeats
+  let last = null, run = 0, counts = { top: 0, bottom: 0 };
+  for (let i = 1; i < r.length; i++) {
+    const a = r[i - 1], b = r[i]; if (a == null || b == null) continue;
+    let kind = null;
+    if (view.events === "out") kind = a > hi && b <= hi ? "top" : a < lo && b >= lo ? "bottom" : null;
+    else if (view.events === "in") kind = a <= hi && b > hi ? "top" : a >= lo && b < lo ? "bottom" : null;
+    else kind = a < hi && b >= hi ? "bottom" : a > lo && b <= lo ? "top" : null;          // momentum: up through hi = bullish
+    if (!kind) continue;
+    run = kind === last ? run + 1 : 1; last = kind; counts[kind]++;
+    const x = X(i), y = Y(b), up = kind === "bottom", c = up ? "var(--gain)" : "var(--loss)";
+    const tri = up ? `${x},${y + 3} ${x - 5},${y + 11} ${x + 5},${y + 11}` : `${x},${y - 3} ${x - 5},${y - 11} ${x + 5},${y - 11}`;
+    const label = view.events === "cross" ? (up ? `crossed up through ${hi}` : `crossed down through ${lo}`)
+      : `${up ? "bottom" : "top"}-${view.events === "out" ? "out" : "in"} #${run} in a row`;
+    g += `<g><title>${minLabel(i)} · RSI ${b.toFixed(1)} · ${label}</title><polygon points="${tri}" fill="${c}"/>` +
+      (view.events !== "cross" && run > 1 ? `<text x="${x}" y="${up ? y + 22 : y - 14}" text-anchor="middle" style="font-weight:700;fill:${c}">${run}</text>` : "") + `</g>`;
+  }
+  svg.innerHTML = g;
+  const what = view.events === "out" ? `▲ bottom-out (back above ${lo}) · ▼ top-out (back below ${hi}) · numbers = how many in a row`
+    : view.events === "in" ? `▲ dropped below ${lo} · ▼ rose above ${hi}` : `▲ crossed up through ${hi} · ▼ crossed down through ${lo}`;
+  note.textContent = `${view.series === "r9" ? "9" : "14"}-period RSI · ${what} · vertical lines = this model's entries · ${counts.top + counts.bottom} signals today`;
+}
+const minLabel = i => { const m = 30 + i, h = 9 + Math.floor(m / 60), mm = m % 60; return `${(h - 1) % 12 + 1}:${String(mm).padStart(2, "0")}`; };
 
 function render() {
   drawFilters();
