@@ -724,6 +724,8 @@ function drawRsiChart({ W, L, R, N, narrow, tk, mode, ts }) {
   [[hi, "var(--loss)"], [lo, "var(--gain)"]].forEach(([v, c]) => {
     g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-dasharray="4 3" opacity="0.8"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`; });
   g += `<line x1="${L}" x2="${W - R}" y1="${Y(50)}" y2="${Y(50)}" stroke="var(--line)"/>`;
+  if (view.strong) view.strong.forEach((v, k) => {
+    g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${k ? "var(--gain)" : "var(--loss)"}" stroke-dasharray="1 3" opacity="0.9"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" style="font-size:10px">${v}</text>`; });
   g += `<text x="${L - 8}" y="${Y(100) + 9}" text-anchor="end">100</text><text x="${L - 8}" y="${Y(0)}" text-anchor="end">0</text>`;
   // trades: a faint vertical line at each entry
   ts.forEach(t => { const x = X(minOf(t.entry_time)); g += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="${t.pnl_usd > 0 ? "var(--gain)" : "var(--loss)"}" opacity="0.45"/>`; });
@@ -732,26 +734,41 @@ function drawRsiChart({ W, L, R, N, narrow, tk, mode, ts }) {
   r.forEach((v, i) => { if (v == null) { pen = false; return; } path += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; });
   g += `<path d="${path}" fill="none" stroke="var(--ink-2)" stroke-width="1.3"/>`;
   // signals: crossings, numbered when the same kind repeats
-  let last = null, run = 0, counts = { top: 0, bottom: 0 };
+  let last = null, run = 0, counts = { top: 0, bottom: 0 }, peak = null, trough = null, triggers = 0;
   for (let i = 1; i < r.length; i++) {
     const a = r[i - 1], b = r[i]; if (a == null || b == null) continue;
+    if (b > hi) peak = Math.max(peak ?? b, b);
+    if (b < lo) trough = Math.min(trough ?? b, b);
     let kind = null;
     if (view.events === "out") kind = a > hi && b <= hi ? "top" : a < lo && b >= lo ? "bottom" : null;
     else if (view.events === "in") kind = a <= hi && b > hi ? "top" : a >= lo && b < lo ? "bottom" : null;
     else kind = a < hi && b >= hi ? "bottom" : a > lo && b <= lo ? "top" : null;          // momentum: up through hi = bullish
     if (!kind) continue;
-    run = kind === last ? run + 1 : 1; last = kind; counts[kind]++;
+    // depth of this visit (how far past the line RSI went), then reset for the next visit
+    const depth = view.events === "out" ? (kind === "top" ? peak ?? a : trough ?? a) : null;
+    if (view.events === "out") { if (kind === "top") peak = null; else trough = null; }
+    // the "strong" rule: after the first hit, a hit only counts if RSI reached 75+ (25 or lower)
+    const weak = view.strong && kind === last && depth != null && (kind === "top" ? depth < view.strong[0] : depth > view.strong[1]);
+    if (!weak) { run = kind === last ? run + 1 : 1; last = kind; }
+    counts[kind]++;
+    const trig = !weak && view.hits && run === view.hits; if (trig) triggers++;
     const x = X(i), y = Y(b), up = kind === "bottom", c = up ? "var(--gain)" : "var(--loss)";
     const tri = up ? `${x},${y + 3} ${x - 5},${y + 11} ${x + 5},${y + 11}` : `${x},${y - 3} ${x - 5},${y - 11} ${x + 5},${y - 11}`;
-    const label = view.events === "cross" ? (up ? `crossed up through ${hi}` : `crossed down through ${lo}`)
-      : `${up ? "bottom" : "top"}-${view.events === "out" ? "out" : "in"} #${run} in a row`;
-    g += `<g><title>${minLabel(i)} · RSI ${b.toFixed(1)} · ${label}</title><polygon points="${tri}" fill="${c}"/>` +
-      (view.events !== "cross" && run > 1 ? `<text x="${x}" y="${up ? y + 22 : y - 14}" text-anchor="middle" style="font-weight:700;fill:${c}">${run}</text>` : "") + `</g>`;
+    const what = view.events === "cross" ? (up ? `crossed up through ${hi}` : `crossed down through ${lo}`)
+      : `${up ? "bottom" : "top"}-${view.events === "out" ? "out" : "in"}` + (depth != null ? ` (RSI reached ${depth.toFixed(1)})` : "");
+    const label = weak ? `${what} · doesn't count: didn't reach ${kind === "top" ? view.strong[0] : view.strong[1]}`
+      : view.events === "cross" ? what : `${what} · #${run} in a row${trig ? " · this is the signal" : ""}`;
+    g += `<g><title>${minLabel(i)} · RSI ${b.toFixed(1)} · ${label}</title>` +
+      (trig ? `<circle cx="${x}" cy="${up ? y + 8 : y - 8}" r="9" fill="none" stroke="${c}" stroke-width="2"/>` : "") +
+      `<polygon points="${tri}" fill="${weak ? "var(--card)" : c}" stroke="${c}" stroke-width="${weak ? 1.5 : 0}"/>` +
+      (view.events !== "cross" && !weak && run > 1 ? `<text x="${x}" y="${up ? y + 24 : y - 16}" text-anchor="middle" style="font-weight:700;fill:${c}">${run}</text>` : "") + `</g>`;
   }
   svg.innerHTML = g;
   const what = view.events === "out" ? `▲ bottom-out (back above ${lo}) · ▼ top-out (back below ${hi}) · numbers = how many in a row`
+      + (view.strong ? ` · hollow = didn't reach ${view.strong[0]} / ${view.strong[1]}, doesn't count` : "")
+      + (view.hits ? ` · ringed = hit #${view.hits}, the signal` : "")
     : view.events === "in" ? `▲ dropped below ${lo} · ▼ rose above ${hi}` : `▲ crossed up through ${hi} · ▼ crossed down through ${lo}`;
-  note.textContent = `${view.series === "r9" ? "9" : "14"}-period RSI · ${what} · vertical lines = this model's entries · ${counts.top + counts.bottom} signals today`;
+  note.textContent = `${{ r9: "9", r14: "14", r20: "20" }[view.series] || "14"}-period RSI · ${what} · vertical lines = this model's entries · ${counts.top + counts.bottom} signals today`;
 }
 const minLabel = i => { const m = 30 + i, h = 9 + Math.floor(m / 60), mm = m % 60; return `${(h - 1) % 12 + 1}:${String(mm).padStart(2, "0")}`; };
 
