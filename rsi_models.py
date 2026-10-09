@@ -9,45 +9,36 @@ afternoon so it is ready at 9:35. The overnight gap is taken out of the warm-up
 one giant 1-minute move. A signal is checked when each minute
 closes and the trade is bought at the next minute's opening price.
 
-Groups (each on SPY and QQQ, three tiers each)
-  RSI Reversal : RSI falls under 30 then crosses back above 30 -> buy the 3x BULL ETF
-                 RSI rises over 70 then crosses back below 70  -> buy the 3x BEAR ETF
-  RSI Momentum : RSI crosses up through 60   -> buy the 3x BULL ETF
-                 RSI crosses down through 40 -> buy the 3x BEAR ETF
-  RSI Long only  : just the "back above 30" buys from RSI Reversal
-  RSI Short only : just the "back below 70" buys (bear ETF) from RSI Reversal
-  RSI Clean reversal : like RSI Reversal, but only after two clean swings. A "top-out" =
-                 RSI went over 70 and came back under; a "bottom-out" = under 30 and
-                 back over. It trades the third extreme of an alternating run:
-                 bottom, top, BOTTOM -> trade that bottom; top, bottom, TOP -> trade
-                 that top. If the run started with a double (top, top, bottom, top),
-                 or there are repeats (top, top, top), nothing is traded.
-  RSI Third touch : trades only the 3rd top-out (or bottom-out) in a row, betting the
-                 repeated pushes are finally exhausted. Same direction as RSI Reversal.
-                 Change STAGGER_COUNT to 4 to wait for the fourth.
-  RSI Reversal 9 : exactly RSI Reversal, but on a 9-period RSI (the last 9 minutes)
-                 instead of 14, so it reacts faster and signals more often.
-  RSI Reversal 80/20 : exactly RSI Reversal, but with stricter extremes: under 20 then
-                 back above 20 -> bull ETF; over 80 then back below 80 -> bear ETF.
-                 Fewer, more stretched signals.
-  RSI Into extreme : the early version of RSI Reversal. Buys the moment RSI first
-                 crosses INTO an extreme instead of waiting for the rebound:
-                 drops below 30 -> bull ETF; rises above 70 -> bear ETF.
-                 Better prices when the turn is near, but it can buy into a falling knife.
-  Random control : the yardstick. Enters at random minutes between 9:35 and 1:00
-                 and flips a coin for direction, with the same tiers, exits and limits.
-                 An RSI group only has a real signal if it clearly beats this.
-                 (Seeded, so it makes the same "random" picks every run.)
-  Top-outs and bottom-outs are counted from 9:30; trades still start at 9:35.
+Groups (each on SPY, QQQ and MU, four tiers each)
+  A "top-out" = RSI went over 70 and came back under; a "bottom-out" = under 30 and back
+  over. Bottom-outs buy the 3x BULL ETF and top-outs buy the 3x BEAR ETF (a reversal bet),
+  unless a group says otherwise.
+  RSI Momentum   : crosses up through 60 -> bull ETF; down through 40 -> bear ETF.
+  RSI Long only  : every bottom-out (bull ETF only).
+  RSI Short only : every top-out (bear ETF only).
+  RSI Clean reversal : the 3rd extreme of a clean alternating run (bottom, top, BOTTOM or
+                 top, bottom, TOP); a run that starts with a double doesn't count.
+  RSI 3 hits (75+) : the 3rd top-out (bottom-out) in a row. Hits 2 and 3 only count if RSI
+                 reached 75 or higher on that visit (25 or lower for bottoms); weaker
+                 ones are ignored. The first hit can be any top-out (bottom-out).
+  RSI 4 hits (75+) : the same, trading the 4th hit; hits 2-4 must reach 75+ (25-).
+  RSI 5 hits / RSI 6 hits : the 5th / 6th top-out (bottom-out) in a row at plain 70 / 30.
+  RSI Reversal 9 : every top-out / bottom-out on a 9-period RSI (faster, more signals).
+  RSI 20, 2 bounces : on a 20-period RSI (slower), the 2nd top-out (bottom-out) in a row.
+  RSI Into extreme : buys the moment RSI first crosses INTO an extreme instead of waiting
+                 for the rebound: drops below 30 -> bull ETF; rises above 70 -> bear ETF.
+  Random control : the yardstick. Random minutes in the entry window, coin flip for
+                 direction, same tiers, exits and limits. (Seeded: same picks every run.)
+  Extremes are counted from 9:30; trades start at 9:35.
 
 Rules for every model
   New trades from 9:35 AM to 1:00 PM ET. One trade open at a time, at most 5 per day.
   Targets on the stock's own move, stop the same size as the target (1:1):
-      SPY / QQQ : Conservative ±0.11%, Moderate ±0.20%, Aggressive ±0.29%
-      MU        : Conservative ±0.23%, Moderate ±0.40%, Aggressive ±0.58%
+      SPY / QQQ : Conservative ±0.11%, Moderate ±0.20%, Aggressive ±0.29%, Super aggressive ±0.38%
+      MU        : Conservative ±0.23%, Moderate ±0.40%, Aggressive ±0.58%, Super aggressive ±0.76%
   (MU's are 2x SPY / QQQ's. At 1:1, random entries win about half the time.)
-  A trade that hasn't hit its target or stop by 3:30 PM is sold then if it's
-  in the green; otherwise it holds (target and stop still live) until 3:55.
+  Target and stop stay live until 3:30 PM; anything still open is sold at 3:30,
+  green or red. (No more "sell if green" check.)
   Priced like the other 3x pages: real ETF price at entry, exit at 3x the
   SPY / QQQ move, $0.005 per share each way.
   MU (Micron) has no 3x ETF (there's a 2x bull, MUU, and a 1x bear, MUD), so MU
@@ -68,16 +59,18 @@ import experimental as X          # shares the Alpaca data code and price tools
 START = "2026-01-01"
 RSI_LEN = 14
 RSI_FAST = 9                      # for the RSI Reversal 9 group
+RSI_SLOW = 20                     # for the RSI 20, 2 bounces group
+STRONG_HI, STRONG_LO = 75, 25     # "strong" hits for the 3- and 4-hit models
 FIRST_SIGNAL, LAST_TIME = "09:35", "13:00"      # window for NEW trades
-GREEN_CHECK, EOD_TIME = "15:30", "15:55"         # sell at 3:30 if green, else hold to 3:55
+EOD_TIME = "15:30"                               # everything still open is sold here, win or lose
 MAX_TRADES = 5
-STAGGER_COUNT = 3                 # RSI Third touch trades the Nth extreme in a row
-ORD = {2: "2nd", 3: "3rd"}.get(STAGGER_COUNT, f"{STAGGER_COUNT}th")
+# hit-count models: (signal name, hits in a row, must hits 2..N be strong?)
+HIT_MODELS = [("hit3s", 3, True), ("hit4s", 4, True), ("hit5", 5, False), ("hit6", 6, False), ("hit2", 2, False)]
 # Target % of the stock's own move, per ticker. STOP_RATIO 1.0 = stop as big as the target (1:1).
 TIERS = {
-    "SPY": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29},
-    "QQQ": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29},
-    "MU":  {"Conservative": 0.23, "Moderate": 0.40, "Aggressive": 0.58},
+    "SPY": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29, "Super aggressive": 0.38},
+    "QQQ": {"Conservative": 0.11, "Moderate": 0.20, "Aggressive": 0.29, "Super aggressive": 0.38},
+    "MU":  {"Conservative": 0.23, "Moderate": 0.40, "Aggressive": 0.58, "Super aggressive": 0.76},
 }
 STOP_RATIO = 1.0
 RANDOM_CANDIDATES = 8             # random entry times offered to the Random control each day
@@ -93,15 +86,17 @@ OUT = X.DATA_DIR / "backtest_rsi.json"
 RSI_VIEW = {
     "rsi_mom": {"series": "r14", "hi": 60, "lo": 40, "events": "cross"},
     "rsi_rev9": {"series": "r9", "hi": 70, "lo": 30, "events": "out"},
-    "rsi_rev8020": {"series": "r14", "hi": 80, "lo": 20, "events": "out"},
     "rsi_into": {"series": "r14", "hi": 70, "lo": 30, "events": "in"},
+    "rsi_hit3": {"series": "r14", "hi": 70, "lo": 30, "events": "out", "strong": [75, 25], "hits": 3},
+    "rsi_hit4": {"series": "r14", "hi": 70, "lo": 30, "events": "out", "strong": [75, 25], "hits": 4},
+    "rsi_hit5": {"series": "r14", "hi": 70, "lo": 30, "events": "out", "hits": 5},
+    "rsi_hit6": {"series": "r14", "hi": 70, "lo": 30, "events": "out", "hits": 6},
+    "rsi_r20b2": {"series": "r20", "hi": 70, "lo": 30, "events": "out", "hits": 2},
 }
 
 MODELS = [{"key": k, "rule": f"SPY/QQQ ±{TIERS['SPY'][k]:.2f}% · MU ±{TIERS['MU'][k]:.2f}% · 1:1 (3× ≈ ±{TIERS['SPY'][k] * LEV:.2f}% / ±{TIERS['MU'][k] * LEV:.2f}%)"}
           for k in TIER_NAMES]
 GROUPS = [
-    {"key": "rsi_rev", "name": "RSI Reversal", "color": "#2B2722", "bull": "up30", "bear": "down70",
-     "desc": "Back above 30 → bull ETF · back below 70 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_mom", "name": "RSI Momentum", "color": "#4C7A5B", "bull": "up60", "bear": "down40",
      "desc": "Crosses up through 60 → bull ETF · down through 40 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_long", "name": "RSI Long only", "color": "#3F6E8C", "bull": "up30", "bear": None,
@@ -110,12 +105,18 @@ GROUPS = [
      "desc": "Only the sells: back below 70 → bear ETF · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_clean", "name": "RSI Clean reversal", "color": "#6B4C7A", "bull": "clean_up30", "bear": "clean_down70",
      "desc": "Trades the 3rd extreme of a clean alternating run (bottom, top, bottom or top, bottom, top) · new trades 9:35–1:00, max 5 a day"},
-    {"key": "rsi_third", "name": "RSI Third touch", "color": "#8A7A2E", "bull": "third_up30", "bear": "third_down70",
-     "desc": f"Trades the {ORD} top-out or bottom-out in a row, as a reversal · new trades 9:35–1:00, max 5 a day"},
+    {"key": "rsi_hit3", "name": "RSI 3 hits (75+)", "color": "#8A7A2E", "bull": "hit3s_up30", "bear": "hit3s_down70",
+     "desc": f"Trades the 3rd top-out (or bottom-out) in a row; hits 2 and 3 must reach {STRONG_HI}+ ({STRONG_LO} or lower for bottoms)"},
+    {"key": "rsi_hit4", "name": "RSI 4 hits (75+)", "color": "#A35D5D", "bull": "hit4s_up30", "bear": "hit4s_down70",
+     "desc": f"Trades the 4th top-out (or bottom-out) in a row; hits 2–4 must reach {STRONG_HI}+ ({STRONG_LO} or lower for bottoms)"},
+    {"key": "rsi_hit5", "name": "RSI 5 hits", "color": "#7A6F9B", "bull": "hit5_up30", "bear": "hit5_down70",
+     "desc": "Trades the 5th top-out (or bottom-out) in a row at the normal 70 / 30 levels"},
+    {"key": "rsi_hit6", "name": "RSI 6 hits", "color": "#2B2722", "bull": "hit6_up30", "bear": "hit6_down70",
+     "desc": "Trades the 6th top-out (or bottom-out) in a row at the normal 70 / 30 levels"},
     {"key": "rsi_rev9", "name": "RSI Reversal 9", "color": "#5E8F99", "bull": "r9_up30", "bear": "r9_down70",
-     "desc": f"Same as RSI Reversal on a {RSI_FAST}-period RSI · back above 30 → bull ETF · back below 70 → bear ETF"},
-    {"key": "rsi_rev8020", "name": "RSI Reversal 80/20", "color": "#A35D5D", "bull": "up20", "bear": "down80",
-     "desc": "Back above 20 → bull ETF · back below 80 → bear ETF · new trades 9:35–1:00, max 5 a day"},
+     "desc": f"{RSI_FAST}-period RSI · back above 30 → bull ETF · back below 70 → bear ETF · new trades 9:35–1:00, max 5 a day"},
+    {"key": "rsi_r20b2", "name": "RSI 20, 2 bounces", "color": "#3F5E8C", "bull": "r20_hit2_up30", "bear": "r20_hit2_down70",
+     "desc": f"{RSI_SLOW}-period RSI · trades the 2nd bottom-out (or top-out) in a row at 70 / 30 · new trades 9:35–1:00, max 5 a day"},
     {"key": "rsi_into", "name": "RSI Into extreme", "color": "#B8875A", "bull": "into30", "bear": "into70",
      "desc": "Buys as RSI first drops below 30 → bull ETF · first rises above 70 → bear ETF · no waiting for the rebound"},
     {"key": "rsi_random", "name": "Random control", "color": "#9A9083", "bull": "rand_up", "bear": "rand_down",
@@ -140,28 +141,30 @@ def wilder_rsi(closes, n=RSI_LEN):
 
 
 def signals(times, rsi):
-    """{'up30': [minute, ...], 'down70': [...], 'up60': [...], 'down40': [...]} by the minute the signal closed."""
-    sig = {k: [] for k in ("up30", "down70", "up60", "down40", "up20", "down80", "into30", "into70",
-                           "clean_up30", "clean_down70", "third_up30", "third_down70")}
-    extremes = []                                    # ("B" or "T", minute), counted from 9:30
+    """{signal name: [minute, ...]} by the minute the signal closed."""
+    sig = {k: [] for k in ("up30", "down70", "up60", "down40", "into30", "into70", "clean_up30", "clean_down70")}
+    for name, _, _ in HIT_MODELS:
+        sig[name + "_up30"], sig[name + "_down70"] = [], []
+    extremes = []                                    # ("B" or "T", minute, deepest RSI of that visit), counted from 9:30
+    peak = trough = None
     for i in range(1, len(times)):
         a, b, t = rsi[i - 1], rsi[i], times[i]
         if a is None or b is None or t >= LAST_TIME:
             continue
-        if a < 30 <= b: extremes.append(("B", t))
-        if a > 70 >= b: extremes.append(("T", t))
+        if b > 70: peak = max(peak or b, b)
+        if b < 30: trough = min(trough or b, b)
+        if a < 30 <= b: extremes.append(("B", t, trough if trough is not None else a)); trough = None
+        if a > 70 >= b: extremes.append(("T", t, peak if peak is not None else a)); peak = None
         if t < FIRST_SIGNAL:
             continue
         if a < 30 <= b: sig["up30"].append(t)
         if a > 70 >= b: sig["down70"].append(t)
         if a < 60 <= b: sig["up60"].append(t)
         if a > 40 >= b: sig["down40"].append(t)
-        if a < 20 <= b: sig["up20"].append(t)
-        if a > 80 >= b: sig["down80"].append(t)
         if a >= 30 > b: sig["into30"].append(t)          # just dropped into oversold
         if a <= 70 < b: sig["into70"].append(t)          # just rose into overbought
-    kinds = [k for k, _ in extremes]
-    for i, (k, t) in enumerate(extremes):
+    kinds = [k for k, _, _ in extremes]
+    for i, (k, t, _) in enumerate(extremes):
         if t < FIRST_SIGNAL:
             continue
         name = "up30" if k == "B" else "down70"
@@ -170,12 +173,19 @@ def signals(times, rsi):
         if (i >= 2 and kinds[i - 1] != k and kinds[i - 2] == k
                 and (i < 3 or kinds[i - 3] != kinds[i - 2])):
             sig["clean_" + name].append(t)
-        # how many of this same extreme in a row, ending here
-        same = 0
-        while i - same >= 0 and kinds[i - same] == k:
-            same += 1
-        if same == STAGGER_COUNT:
-            sig["third_" + name].append(t)
+    # N hits in a row: the first hit can be any top-out (bottom-out); for "strong" models, later hits
+    # only count if RSI reached 75+ (25 or lower) on that visit; weaker ones are ignored, not counted
+    for name, n, strong in HIT_MODELS:
+        kind, count = None, 0
+        for k, t, depth in extremes:
+            if k != kind:
+                kind, count = k, 1
+            elif strong and not (depth >= STRONG_HI if k == "T" else depth <= STRONG_LO):
+                continue
+            else:
+                count += 1
+            if count == n and t >= FIRST_SIGNAL:
+                sig[f"{name}_{'up30' if k == 'B' else 'down70'}"].append(t)
     return sig
 
 
@@ -231,10 +241,12 @@ class Engine:
             closes = warm + [ub[t][3] for t in times]
             self.carry[tk] = [ub[t][3] for t in times][-60:]
             r14, r9 = wilder_rsi(closes)[len(warm):], wilder_rsi(closes, RSI_FAST)[len(warm):]
-            self.rsi.setdefault(day, {})[tk] = {"r14": by_minute(times, r14), "r9": by_minute(times, r9)}
+            r20 = wilder_rsi(closes, RSI_SLOW)[len(warm):]
+            self.rsi.setdefault(day, {})[tk] = {"r14": by_minute(times, r14), "r9": by_minute(times, r9), "r20": by_minute(times, r20)}
             sig = signals(times, r14)
             fast = signals(times, r9)
             sig.update({"r9_" + k: v for k, v in fast.items()})
+            sig.update({"r20_" + k: v for k, v in signals(times, r20).items()})
             # Random control: random minutes in the entry window, coin-flip direction (seeded per day + ticker)
             rng = random.Random(f"{day}|{tk}")
             window = [t for t in times if FIRST_SIGNAL <= t < LAST_TIME]
@@ -281,18 +293,15 @@ class Engine:
             return None
         tgt, stp = p_in * (1 + d * tp / 100), p_in * (1 - d * tp * STOP_RATIO / 100)
         value = lambda u: max(0.01, etf_raw * (1 + LEV * d * (u / p_in - 1)) - cost)
-        hit, checked = None, False
+        hit = None
         for t, (o, h, l, c) in X.after(ub, t_in, EOD_TIME):
             if t != t_in and d * (o - stp) <= 0: hit = (t, o, "stop"); break
             if t != t_in and d * (o - tgt) >= 0: hit = (t, o, "target"); break
-            if t >= GREEN_CHECK and not checked:          # 3:30 PM: take it if it's in the green
-                checked = True
-                if value(o) > entry_fill: hit = (t, o, "3:30 green"); break
             worst, best = (l, h) if bull else (h, l)
             if d * (worst - stp) <= 0: hit = (t, stp, "stop"); break       # both in one minute: stop first
             if d * (best - tgt) >= 0: hit = (t, tgt, "target"); break
         if not hit:
-            hit = (EOD_TIME, X.price_at(ub, EOD_TIME), "end of day")
+            hit = (EOD_TIME, X.price_at(ub, EOD_TIME), "3:30 close")
         t_out, u_out, reason = hit
         exit_fill = value(u_out)
         self.trades.append({
@@ -333,7 +342,7 @@ def run(data, start, end=None):
         "note": (f"{RSI_LEN}-period RSI on 1-minute SPY/QQQ closes ({RSI_FAST}-period for RSI Reversal 9), warmed up with the prior afternoon (overnight gap removed). "
                  f"Targets and stops are the same size (1:1), so random entries win about half the time; compare every group with Random control. "
                  f"New trades 9:35 AM–1:00 PM, bought at the next minute's open; one trade at a time, max {MAX_TRADES} per model per day. "
-                 f"No target or stop by 3:30 PM: sold then if green, otherwise held to 3:55. {LEV}x ETFs, ${TRADE:.0f} per trade, ${SLIP} per share each way. "
+                 f"Target and stop live until 3:30 PM, then anything still open is sold. {LEV}x ETFs, ${TRADE:.0f} per trade, ${SLIP} per share each way. "
                  f"MU has no 3x ETF, so MU trades are a 3x estimate from Micron's own move, {MU_COST * 100:.2f}% round-trip cost"),
         "groups": [{k: g[k] for k in ("key", "name", "desc", "color")} | {"models": MODELS} for g in GROUPS],
         "tickers": list(PAIRS),
